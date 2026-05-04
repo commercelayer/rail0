@@ -240,6 +240,194 @@ event Withdraw  (address indexed sponsor, address indexed to,   uint256 amount);
 event Sponsored (address indexed sponsor, bytes32 indexed userOpHash, uint256 actualGasCost);
 ```
 
+## Examples
+
+End-to-end `cast` recipes for every workflow. Examples use `--private-key` for readability — in production, prefer `cast wallet import <name>` once and then `--account <name>` on each command (never put long-lived keys on the command line).
+
+### Setup
+
+Set the addresses and keys you'll reuse:
+
+```sh
+export RPC=https://rpc.example.network
+export RAIL0=0x...                  # the RAIL0 deployment
+export SPONSOR=0x...                # the RAIL0Sponsor deployment (if used)
+export TOKEN=0x...                  # an accepted stablecoin
+export PAYER=0x...                  # buyer wallet
+export PAYEE=0x...                  # merchant wallet
+export FEE_RCV=0x...                # fee receiver (or 0x0 if feeBps == 0)
+export PAYER_KEY=0x...              # buyer signing key
+export PAYEE_KEY=0x...              # merchant signing key
+```
+
+The `Payment` struct is a 9-field tuple. Define it once and reuse:
+
+```sh
+# (payer, payee, token, maxAmount, preApprovalExpiry, authorizationExpiry, refundExpiry, feeBps, feeReceiver)
+export PAYMENT="($PAYER,$PAYEE,$TOKEN,1000000000,1735689600,1736294400,1738972800,250,$FEE_RCV)"
+export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint48,uint16,address)'
+export PAYMENT_ID=$(cast keccak "order-12345")
+```
+
+### One-time approvals
+
+Buyer grants RAIL0 the right to pull tokens for `authorize` / `charge`:
+
+```sh
+cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+Merchant grants RAIL0 the right to pull tokens for `refund`:
+
+```sh
+cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+```
+
+### Authorize → Capture → Refund
+
+**Buyer authorizes** (escrows funds):
+
+```sh
+cast send $RAIL0 "authorize(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+**Merchant captures** (pulls escrow into payee + fee receiver):
+
+```sh
+# Full capture
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+
+# Partial capture (can be called multiple times up to original amount)
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 30000000 \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+```
+
+**Merchant refunds** (pulls from own wallet back to buyer):
+
+```sh
+cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 50000000 \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+```
+
+### Charge (one-shot pay-through)
+
+Skip escrow; pay merchant immediately. Refunds remain available until `refundExpiry`.
+
+```sh
+cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+### Void (merchant cancels authorization)
+
+Returns all currently-escrowed funds to the buyer. No deadline.
+
+```sh
+cast send $RAIL0 "void(bytes32,$PAYMENT_TYPE)" \
+  $PAYMENT_ID "$PAYMENT" \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+```
+
+### Reclaim (buyer's safety net)
+
+After `authorizationExpiry`, if no capture happened, the buyer pulls their escrow back:
+
+```sh
+cast send $RAIL0 "reclaim(bytes32,$PAYMENT_TYPE)" \
+  $PAYMENT_ID "$PAYMENT" \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+### Permit-bundled variants
+
+These need an EIP-2612 `permit` signature on the token. Computing it requires the token's domain separator and the signer's nonce — typically done by a wallet/SDK rather than on the command line. The shape:
+
+```sh
+# Sign the permit off-chain (wallet/SDK), then:
+cast send $RAIL0 "permitAndAuthorize(bytes32,$PAYMENT_TYPE,uint256,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 \
+  $DEADLINE $V $R $S \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+Same shape for `permitAndCharge` (signed by buyer) and `permitAndRefund` (signed by merchant — owner is `$PAYEE`).
+
+### Reading state
+
+Payment state (returns `(bool exists, uint120 capturable, uint120 refundable)`):
+
+```sh
+cast call $RAIL0 "getPaymentState(bytes32)((bool,uint120,uint120))" \
+  $PAYMENT_ID --rpc-url $RPC
+```
+
+Stored config hash:
+
+```sh
+cast call $RAIL0 "getConfigHash(bytes32)(bytes32)" \
+  $PAYMENT_ID --rpc-url $RPC
+```
+
+Compute the EIP-712 digest the contract uses (matches `getConfigHash` after `authorize`):
+
+```sh
+cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" \
+  "$PAYMENT" --rpc-url $RPC
+```
+
+Domain separator and allowlist check:
+
+```sh
+cast call $RAIL0 "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC
+cast call $RAIL0 "isAcceptedToken(address)(bool)" $TOKEN --rpc-url $RPC
+```
+
+### Gas sponsorship (RAIL0Sponsor)
+
+**Sponsor deposits gas** (forwards to the EntryPoint, credits internal balance):
+
+```sh
+# Deposit for self
+cast send $SPONSOR "deposit()" --value 0.1ether \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+
+# Deposit on behalf of another sponsor
+cast send $SPONSOR "depositFor(address)" $PAYEE --value 0.1ether \
+  --rpc-url $RPC --private-key $PAYER_KEY
+```
+
+**Check sponsor balance:**
+
+```sh
+cast call $SPONSOR "deposits(address)(uint256)" $PAYEE --rpc-url $RPC
+```
+
+**Withdraw unused balance** (only the sponsor itself can withdraw their own):
+
+```sh
+cast send $SPONSOR "withdraw(address,uint256)" $PAYEE 50000000000000000 \
+  --rpc-url $RPC --private-key $PAYEE_KEY
+```
+
+**Compute the sponsorship digest** for off-chain signing:
+
+```sh
+cast call $SPONSOR "hashSponsorship(bytes32,address,uint48,uint48)(bytes32)" \
+  $USER_OP_HASH $PAYEE $VALID_UNTIL $VALID_AFTER \
+  --rpc-url $RPC
+```
+
+The merchant signs this digest, then constructs the UserOp's `paymasterAndData` as `[paymaster (20)][verifGas (16)][postOpGas (16)][sponsor (20)][validUntil (6)][validAfter (6)][signature (65)]` and sends it through a bundler. End-to-end UserOp construction is outside `cast`'s scope — use a 4337 SDK (Pimlico, Stackup, ZeroDev, viem account-abstraction) to assemble and submit.
+
 ## Development
 
 The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted at `contracts/`.
