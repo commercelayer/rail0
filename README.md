@@ -1,7 +1,6 @@
 # rail0
-_Peer-to-peer stablecoin payments for commerce._
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides permissionless ERC-4337 gas sponsorship for chains that lack native fee-payer mechanisms.
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides the standard mechanism for merchants to sponsor their buyers' gas — permissionless ERC-4337 paymaster infrastructure that works uniformly across every supported chain.
 
 ## Protocol
 
@@ -188,7 +187,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `reclaim` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 48-test Foundry suite (`contract/test/RAIL0.t.sol`) covers the lifecycle, allowlist construction, every revert path, EIP-712 hashing, permit wrappers (success + fallback), reentrancy attempts via a malicious mock token, and USDT-style non-returning tokens. No external audit has been performed.
+- **Test coverage.** A 48-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the lifecycle, allowlist construction, every revert path, EIP-712 hashing, permit wrappers (success + fallback), reentrancy attempts via a malicious mock token, and USDT-style non-returning tokens. No external audit has been performed.
 
 ### Limits
 
@@ -206,9 +205,11 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 ## Gas sponsorship
 
-Some target chains have native stablecoin-as-gas (Arc, Tempo) and need no additional sponsorship layer — the buyer pays gas in the same stablecoin they're sending. Others (Plasma's quota model aside) require a way for a third party — typically the merchant or platform — to cover the buyer's gas.
+In RAIL0, the merchant sponsors the buyer's gas — the same arrangement card networks have always had, where infrastructure cost is borne by the merchant rather than the buyer. This is the standard pattern across every chain RAIL0 deploys to, regardless of what fee-payer mechanisms the chain provides natively.
 
-For chains without native sponsorship, RAIL0 ships a companion contract: **`RAIL0Sponsor`** (`contract/src/RAIL0Sponsor.sol`). It is a permissionless ERC-4337 v0.7 paymaster that anyone can fund and use to sponsor RAIL0 transactions for any user.
+The mechanism is **`RAIL0Sponsor`** (`contracts/src/RAIL0Sponsor.sol`), a permissionless ERC-4337 v0.7 paymaster shipped alongside RAIL0. Merchants deposit native gas into the contract and authorize each buyer's UserOperation with an EIP-712 signature; the paymaster validates the signature and pays the gas. Because the same contract works on every supported chain, integrators have one mechanism, one signing flow, and one operational model — not a per-chain fork that switches between Tempo's native fee-payer, Arc's paymaster infrastructure, Plasma's quota system, and so on.
+
+This commits the buyer to a smart-account wallet (any ERC-4337-compatible account: SimpleAccount, Safe with the 4337 plugin, Kernel, Biconomy V2, Circle Modular Wallets, etc.) — which is the dominant direction for end-user wallets and the right bet to standardize on.
 
 ### Properties
 
@@ -239,13 +240,9 @@ event Withdraw  (address indexed sponsor, address indexed to,   uint256 amount);
 event Sponsored (address indexed sponsor, bytes32 indexed userOpHash, uint256 actualGasCost);
 ```
 
-### When you don't need it
-
-On chains where the stablecoin is the native gas token (Arc, Tempo) or where a protocol-level paymaster already covers payment-style transactions (Plasma, within quota), `RAIL0Sponsor` is unnecessary. Deploy only on chains where you actually need third-party gas sponsorship.
-
 ## Development
 
-The contract lives at `contract/src/RAIL0.sol`. The Foundry workspace is rooted at `contract/`.
+The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted at `contracts/`.
 
 ### Prerequisites
 
@@ -258,17 +255,17 @@ The repo uses `forge-std` as a git submodule, so clone with `--recurse-submodule
 ### Build & test
 
 ```sh
-cd contract
+cd contracts
 forge build
 forge test
 ```
 
-The test suite (`contract/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard, USDT-style (no return value), reverting, and reentrant cases, so no fork or RPC is needed.
+The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard, USDT-style (no return value), reverting, and reentrant cases, so no fork or RPC is needed.
 
 ### Layout
 
 ```
-contract/
+contracts/
 ├── foundry.toml
 ├── src/
 │   ├── RAIL0.sol                  # the protocol contract
