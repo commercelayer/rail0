@@ -6,7 +6,7 @@ Stablecoins changed the substrate. A dollar can move between two wallets in unde
 
 RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Anyone can sponsor gas. It composes with smart-account wallets, accepts any ERC-20 stablecoin, runs on any EVM-compatible chain, and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
-Payment rails should be open like the rest of the internet. That is the mission.
+Payment rails should be open like the rest of the internet. That is the mission. The zero in RAIL0 is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, RAIL0 is the last payment rail the new era needs. The rest is just integration.
 
 ## Protocol
 
