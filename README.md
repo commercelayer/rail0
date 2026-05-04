@@ -1,8 +1,16 @@
 # rail0
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides the standard mechanism for sponsoring buyers' gas — permissionless ERC-4337 paymaster infrastructure that works uniformly across every supported chain. Anyone can be a sponsor: merchants, platforms, payment facilitators, grant programs, or buyers themselves.
+The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can implement, run, and build on without permission. Payments are the conspicuous exception. Online commerce today still routes through a layered stack of intermediaries (networks, processors, gateways, issuers, acquirers), each taking a fee, adding latency, and reserving the right to refuse service. Cross-border settlement is slow and expensive. Refunds and disputes happen off-rail. Programmable money, twenty years into the API economy, is still mostly marketing.
+
+Stablecoins changed the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
+
+RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Anyone can sponsor gas. It composes with smart-account wallets, accepts any ERC-20 stablecoin, runs on any EVM-compatible chain, and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+
+Payment rails should be open like the rest of the internet. That is the mission.
 
 ## Protocol
+
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides the standard mechanism for sponsoring buyers' gas — permissionless ERC-4337 paymaster infrastructure that works uniformly across every supported chain. Anyone can be a sponsor: merchants, platforms, payment facilitators, grant programs, or buyers themselves.
 
 ### Lifecycle
 
