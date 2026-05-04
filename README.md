@@ -1,6 +1,6 @@
 # rail0
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides the standard mechanism for merchants to sponsor their buyers' gas — permissionless ERC-4337 paymaster infrastructure that works uniformly across every supported chain.
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides the standard mechanism for sponsoring buyers' gas — permissionless ERC-4337 paymaster infrastructure that works uniformly across every supported chain. Anyone can be a sponsor: merchants, platforms, payment facilitators, grant programs, or buyers themselves.
 
 ## Protocol
 
@@ -105,7 +105,7 @@ Per `paymentId`, the contract keeps two storage entries:
 
 ### Token allowlist
 
-Each RAIL0 deployment is constructed with a fixed list of accepted ERC-20 token addresses. Calls to `authorize`/`charge` revert with `TokenNotAccepted` if `p.token` is not in the allowlist. The allowlist is set in the constructor and **cannot be modified afterward** — adding a new stablecoin requires a new deployment. This preserves the "no privileged roles, ever" property: there is no admin who can change which tokens RAIL0 will process.
+Each RAIL0 deployment is constructed with a fixed list of accepted ERC-20 token addresses. Calls to `authorize`/`charge` revert with `TokenNotAccepted` if `p.token` is not in the allowlist. The allowlist is set in the constructor and **cannot be modified afterward** — adding a new stablecoin requires a new deployment.
 
 A `TokenAccepted(address indexed token)` event is emitted from the constructor for each entry, so an indexer can reconstruct the allowlist from the deployment transaction's logs. `isAcceptedToken(address)` is a public view for the same query.
 
@@ -205,9 +205,9 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 ## Gas sponsorship
 
-In RAIL0, the merchant sponsors the buyer's gas — the same arrangement card networks have always had, where infrastructure cost is borne by the merchant rather than the buyer. This is the standard pattern across every chain RAIL0 deploys to, regardless of what fee-payer mechanisms the chain provides natively.
+In RAIL0, a third-party sponsor can pay the buyer's gas. The protocol is agnostic about who that sponsor is — most often it's the merchant (mirroring how card networks shift infrastructure cost off the buyer), but it can equally be a platform aggregating many merchants, a payment facilitator, a chain-grant program subsidizing certain categories of transactions, or the buyer themselves pre-funding their own ops. This is the standard pattern across every chain RAIL0 deploys to, regardless of what fee-payer mechanisms the chain provides natively.
 
-The mechanism is **`RAIL0Sponsor`** (`contracts/src/RAIL0Sponsor.sol`), a permissionless ERC-4337 v0.7 paymaster shipped alongside RAIL0. Merchants deposit native gas into the contract and authorize each buyer's UserOperation with an EIP-712 signature; the paymaster validates the signature and pays the gas. Because the same contract works on every supported chain, integrators have one mechanism, one signing flow, and one operational model — not a per-chain fork that switches between Tempo's native fee-payer, Arc's paymaster infrastructure, Plasma's quota system, and so on.
+The mechanism is **`RAIL0Sponsor`** (`contracts/src/RAIL0Sponsor.sol`), a permissionless ERC-4337 v0.7 paymaster shipped alongside RAIL0. Any address can deposit native gas into the contract under its own sponsor identity and authorize buyer UserOperations with an EIP-712 signature; the paymaster validates the signature and pays the gas from that sponsor's balance. Because the same contract works on every supported chain, integrators have one mechanism, one signing flow, and one operational model — not a per-chain fork that switches between Tempo's native fee-payer, Arc's paymaster infrastructure, Plasma's quota system, and so on.
 
 This commits the buyer to a smart-account wallet (any ERC-4337-compatible account: SimpleAccount, Safe with the 4337 plugin, Kernel, Biconomy V2, Circle Modular Wallets, etc.) — which is the dominant direction for end-user wallets and the right bet to standardize on.
 
