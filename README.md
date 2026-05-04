@@ -1,17 +1,9 @@
 # rail0
-Peer-to-peer stablecoin payments for commerce.
+_Peer-to-peer stablecoin payments for commerce._
 
-## Design principles
-
-1. Peer-to-peer
-2. Never touch money
-3. Virtually free
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The intended environment is the emerging category of **stablecoin-gas L1 chains** — Tempo, Arc, Plasma, Codex — where a stablecoin is the chain's native gas token, finality is sub-second, and the buyer's experience stays single-asset end to end. A companion contract, `RAIL0Sponsor`, provides permissionless ERC-4337 gas sponsorship for chains that lack native fee-payer mechanisms.
 
 ## Protocol
-
-RAIL0 is a single Solidity contract (`contract/src/RAIL0.sol`) that brokers stablecoin payments on any EVM-compatible chain using the standard **authorize → capture → refund** lifecycle familiar from card networks. Each deployment is configured with an immutable allowlist of accepted ERC-20 stablecoins; no owner, no admin, no upgradeability, no protocol fee. The contract is a permissionless settlement primitive that two counterparties can use directly.
-
-The intended deployment target is the emerging category of **stablecoin-gas chains** — chains where a stablecoin (USDC, USDT, EURC, …) is the native gas token, giving buyers and merchants a single-asset experience. Examples include Tempo, Arc, Plasma, Codex, and CELO.
 
 ### Lifecycle
 
@@ -212,6 +204,45 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 |-------|---------------|-----------------|
 | _none yet_ | | |
 
+## Gas sponsorship
+
+Some target chains have native stablecoin-as-gas (Arc, Tempo) and need no additional sponsorship layer — the buyer pays gas in the same stablecoin they're sending. Others (Plasma's quota model aside) require a way for a third party — typically the merchant or platform — to cover the buyer's gas.
+
+For chains without native sponsorship, RAIL0 ships a companion contract: **`RAIL0Sponsor`** (`contract/src/RAIL0Sponsor.sol`). It is a permissionless ERC-4337 v0.7 paymaster that anyone can fund and use to sponsor RAIL0 transactions for any user.
+
+### Properties
+
+- **No privileged roles.** Same as RAIL0 itself: no owner, no admin, no upgradeability. The EntryPoint and target RAIL0 addresses are immutable, set in the constructor.
+- **Permissionless deposits.** Anyone can deposit native gas to their own balance via `deposit()` or to another sponsor's balance via `depositFor(address)`. Each sponsor controls only their own balance.
+- **Scoped to RAIL0.** The paymaster verifies on-chain that the sponsored UserOperation is calling one of RAIL0's nine entrypoints via the standard `execute(address,uint256,bytes)` smart-account ABI. A compromised sponsor key can only drain its own deposit on RAIL0 transactions — never on unrelated calls.
+- **EIP-712 sponsor signatures.** Each UserOp must carry an EIP-712 signature from the sponsor authorizing that specific `userOpHash`, valid within `[validAfter, validUntil]`. The signed type is `Sponsorship(bytes32 userOpHash,address sponsor,uint48 validUntil,uint48 validAfter)`.
+- **Pre-deduct + refund accounting.** `validatePaymasterUserOp` deducts `maxCost` from the sponsor's balance up front; `postOp` refunds the difference between `maxCost` and `actualGasCost`. This serializes concurrent sponsored ops from the same sponsor without requiring a nonce.
+
+### Sponsor flow
+
+1. Sponsor calls `deposit{value: amount}()` (or someone calls `depositFor{value: amount}(sponsor)`). The contract forwards the deposit to the EntryPoint and credits the sponsor's internal balance.
+2. A user (typically a smart-account wallet) prepares a `UserOperation` calling RAIL0 via `execute(rail0, 0, encodedRailCall)`.
+3. The sponsor's signing service computes the userOpHash, signs the EIP-712 `Sponsorship` digest, and attaches `paymasterAndData` containing `[paymaster][verifGas][postOpGas][sponsor][validUntil][validAfter][signature]`.
+4. The bundler submits the UserOp. The EntryPoint calls `validatePaymasterUserOp`, which verifies scope + signature + balance and pre-deducts `maxCost`.
+5. Execution runs. The EntryPoint calls `postOp` with the actual gas cost; the sponsor's balance is restored by `(maxCost - actualGasCost)`.
+6. The sponsor can withdraw unused balance any time via `withdraw(to, amount)`.
+
+### Account compatibility
+
+The paymaster expects the smart account to expose the standard `execute(address target, uint256 value, bytes data)` selector (`0xb61d27f6`) — used by SimpleAccount, Kernel, Safe with the 4337 plugin, Biconomy V2, and most other modular accounts. Accounts that use non-standard outer ABIs (for example, ERC-7579 batched `execute(bytes32 mode, bytes data)` only) are not sponsorable through this paymaster and would need a different one.
+
+### Sponsor events
+
+```solidity
+event Deposit   (address indexed sponsor, address indexed from, uint256 amount);
+event Withdraw  (address indexed sponsor, address indexed to,   uint256 amount);
+event Sponsored (address indexed sponsor, bytes32 indexed userOpHash, uint256 actualGasCost);
+```
+
+### When you don't need it
+
+On chains where the stablecoin is the native gas token (Arc, Tempo) or where a protocol-level paymaster already covers payment-style transactions (Plasma, within quota), `RAIL0Sponsor` is unnecessary. Deploy only on chains where you actually need third-party gas sponsorship.
+
 ## Development
 
 The contract lives at `contract/src/RAIL0.sol`. The Foundry workspace is rooted at `contract/`.
@@ -240,8 +271,12 @@ The test suite (`contract/test/RAIL0.t.sol`) is self-contained — it includes m
 contract/
 ├── foundry.toml
 ├── src/
-│   ├── RAIL0.sol               # the protocol contract
-│   └── interfaces/IERC20.sol   # IERC20 + IERC20Permit
+│   ├── RAIL0.sol                  # the protocol contract
+│   ├── RAIL0Sponsor.sol           # ERC-4337 gas sponsorship companion
+│   └── interfaces/
+│       ├── IERC20.sol             # IERC20 + IERC20Permit
+│       └── IERC4337.sol           # IEntryPoint, IPaymaster, PackedUserOperation
 └── test/
-    └── RAIL0.t.sol             # full test suite + mocks
+    ├── RAIL0.t.sol                # 48 tests
+    └── RAIL0Sponsor.t.sol         # 25 tests
 ```
