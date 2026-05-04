@@ -14,3 +14,9 @@ fs_permissions = [{ access = "read", path = "./" }]
 line_length = 120
 tab_width = 4
 bracket_spacing = true
+
+[lint]
+# `asm-keccak256` would micro-optimize keccak256 calls via inline assembly. The
+# saving is ~30 gas per call on functions that aren't in any hot loop, and
+# inline assembly hurts readability — not worth the trade.
+exclude_lints = ["asm-keccak256"]

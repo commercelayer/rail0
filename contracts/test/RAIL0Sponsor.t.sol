@@ -225,7 +225,10 @@ contract RAIL0SponsorTest is Test {
         vm.prank(address(entryPoint));
         (, uint256 validationData) = sponsor.validatePaymasterUserOp(op, userOpHash, 1 ether);
 
+        // Safe casts: those bit ranges were packed from uint48 values upstream.
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint48 decodedUntil = uint48(validationData >> 160);
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint48 decodedAfter = uint48(validationData >> 208);
         assertEq(decodedUntil, validUntil);
         assertEq(decodedAfter, validAfter);

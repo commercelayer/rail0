@@ -57,9 +57,17 @@ contract RAIL0 {
     uint256 private _reentrancyStatus = _NOT_ENTERED;
 
     modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() private {
         if (_reentrancyStatus == _ENTERED) revert Reentrancy();
         _reentrancyStatus = _ENTERED;
-        _;
+    }
+
+    function _nonReentrantAfter() private {
         _reentrancyStatus = _NOT_ENTERED;
     }
 

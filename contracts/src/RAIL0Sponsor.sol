@@ -209,6 +209,8 @@ contract RAIL0Sponsor is IPaymaster {
     ///      smart account. Reverts unless the inner call targets RAIL0 and uses one of its
     ///      nine entrypoint selectors. Accounts using non-standard execute ABIs are not
     ///      sponsorable through this paymaster.
+    // RAIL0 is the brand acronym, kept uppercase like ERC20 / USDC.
+    // forge-lint: disable-next-line(mixed-case-function)
     function _verifyTargetsRAIL0(bytes calldata accountCallData) internal view {
         // Layout: [4 selector][32 target][32 value][32 data offset][32 data length][data...]
         if (accountCallData.length < 4 + 32 + 32 + 32 + 32) revert UnsupportedAccountCall();

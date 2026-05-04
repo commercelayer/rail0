@@ -10,7 +10,10 @@ import { RAIL0 } from "../src/RAIL0.sol";
 
 /// Standard ERC-20 with EIP-2612 permit.
 contract MockERC20 {
+    // Lowercase to match the ERC-20 standard's `name()` / `version()` getters.
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant name = "Mock Stablecoin";
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant version = "1";
 
     mapping(address => uint256) public balanceOf;
