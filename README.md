@@ -442,13 +442,16 @@ The sponsor signs this digest, then constructs the UserOp's `paymasterAndData` a
 
 Walk-through of a single buyer `authorize` where a sponsor pays the gas. The sponsor here is a generic third party — it could be the merchant, a platform, a payment facilitator, a grant program, or even the buyer's own EOA depositing on its smart account's behalf. The protocol treats them identically: any address with a balance at `RAIL0Sponsor` and a signing key can sponsor any RAIL0 UserOp.
 
-Assumes the buyer uses an ERC-4337 smart-account wallet exposing the standard `execute(address,uint256,bytes)` and has approved RAIL0 to pull the token (or the flow uses `permitAndAuthorize` — same pattern, extra args).
+Assumes the buyer uses a deployed SimpleAccount-style ERC-4337 smart-account wallet (ECDSA signing scheme over `userOpHash`), exposing the standard `execute(address,uint256,bytes)`, and has approved RAIL0 to pull the token (or the flow uses `permitAndAuthorize` — same pattern, extra args).
 
-**Roles**
+**Additional setup**
 
-- `BUYER_SCA` — the buyer's smart account address (the UserOp `sender`)
-- `SPONSOR_ADDR` — the sponsor's identity (the address whose `deposits[SPONSOR_ADDR]` will be debited)
-- `SPONSOR_KEY` — the sponsor's signing key (only used to sign the sponsorship digest; never spends funds directly)
+```sh
+export ENTRY_POINT=0x0000000071727De22E5E9d8BAf0edAc6f37da032   # canonical v0.7
+export BUYER_SCA=0x...                                          # buyer's deployed smart account
+export BUYER_KEY=0x...                                          # buyer's ECDSA key (the smart account's owner)
+export BUNDLER_RPC=https://...                                  # bundler RPC endpoint
+```
 
 **One-time sponsor setup**
 
@@ -458,73 +461,70 @@ cast send $SPONSOR "deposit()" --value 1000000000000000000 \
   --rpc-url $RPC --private-key $SPONSOR_KEY
 ```
 
-**Per-payment flow**
+**Per-payment flow** (pure `cast` + `cast rpc`):
 
-UserOp assembly requires off-chain plumbing — bundler RPC, account-specific nonce/signature schemes, gas estimation. This is what 4337 SDKs are for. Sketch with viem + permissionless.js:
+```sh
+# 1. Inner call: RAIL0.authorize(paymentId, payment, amount)
+RAIL_CALL=$(cast calldata "authorize(bytes32,$PAYMENT_TYPE,uint256)" \
+  $PAYMENT_ID "$PAYMENT" 100000)
 
-```ts
-import { encodeFunctionData, encodePacked, parseAbi } from "viem";
-import { getUserOperationHash } from "permissionless";
-import { rail0SponsorAbi, rail0Abi } from "./abi";
+# 2. Outer call: smart account's execute(rail0, 0, railCallData)
+ACCOUNT_CALL=$(cast calldata "execute(address,uint256,bytes)" \
+  $RAIL0 0 $RAIL_CALL)
 
-// 1. Inner call: RAIL0.authorize(paymentId, payment, amount)
-const railCallData = encodeFunctionData({
-  abi: rail0Abi,
-  functionName: "authorize",
-  args: [PAYMENT_ID, PAYMENT, 100_000n], // 0.1 USDC at 6 decimals
-});
+# 3. Get the buyer SCA's nonce from the EntryPoint (key=0)
+NONCE=$(cast call $ENTRY_POINT "getNonce(address,uint192)(uint256)" \
+  $BUYER_SCA 0 --rpc-url $RPC)
 
-// 2. Outer call: smart account's execute(rail0, 0, railCallData)
-const accountCallData = encodeFunctionData({
-  abi: parseAbi(["function execute(address,uint256,bytes)"]),
-  functionName: "execute",
-  args: [RAIL0_ADDRESS, 0n, railCallData],
-});
+# 4. Pack gas limits (verifGas<<128 | callGas) and gas fees (maxPrio<<128 | maxFee).
+#    Use generous fixed values for the example; production should estimate via
+#    `cast rpc --rpc-url $BUNDLER_RPC eth_estimateUserOperationGas ...`.
+ACCOUNT_GAS_LIMITS=0x00000000000000000000000000030d4000000000000000000000000000186a0  # verif=200k, call=100k
+GAS_FEES=0x000000000000000000000000773594000000000000000000000000000ee6b2800           # prio=2gwei, max=4gwei
+PRE_VERIF_GAS=21000
 
-// 3. Build a UserOp shell. The bundler estimates gas; we attach paymasterAndData
-//    with a placeholder signature so estimation accounts for paymaster cost.
-const validUntil = BigInt(Math.floor(Date.now() / 1000) + 600);
-const validAfter = 0n;
-const placeholderSig = "0x" + "00".repeat(65);
-const pmdNoSig = encodePacked(
-  ["address", "uint128", "uint128", "address", "uint48", "uint48"],
-  [SPONSOR_ADDRESS, 100_000n, 50_000n, SPONSOR_ADDR, validUntil, validAfter]
-);
-let userOp = await bundler.prepareUserOperation({
-  account: buyerSmartAccount,
-  callData: accountCallData,
-  paymasterAndData: pmdNoSig + placeholderSig.slice(2),
-});
+# 5. paymasterAndData prefix (no signature yet)
+VALID_UNTIL=$(($(date +%s) + 600))
+VALID_AFTER=0
+PMD_NO_SIG=0x${SPONSOR:2}$(printf '%032x' 100000)$(printf '%032x' 50000)${SPONSOR_ADDR:2}$(printf '%012x' $VALID_UNTIL)$(printf '%012x' $VALID_AFTER)
+PLACEHOLDER_SIG=0x$(printf '%0130d' 0)
 
-// 4. Compute the userOpHash the EntryPoint will see
-const userOpHash = getUserOperationHash({
-  userOperation: userOp,
-  entryPoint: ENTRY_POINT,
-  chainId: CHAIN_ID,
-});
+# 6. Compute the EntryPoint's userOpHash for this op
+USER_OP_TUPLE="($BUYER_SCA,$NONCE,0x,$ACCOUNT_CALL,$ACCOUNT_GAS_LIMITS,$PRE_VERIF_GAS,$GAS_FEES,${PMD_NO_SIG}${PLACEHOLDER_SIG:2},0x)"
+USER_OP_HASH=$(cast call $ENTRY_POINT \
+  "getUserOpHash((address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes))(bytes32)" \
+  "$USER_OP_TUPLE" --rpc-url $RPC)
 
-// 5. Sponsor signs the EIP-712 sponsorship digest. Note: signed as a RAW hash
-//    (no EIP-191 "\x19Ethereum Signed Message:" prefix), because the contract
-//    verifies via ecrecover directly on the digest.
-const sponsorshipDigest = await publicClient.readContract({
-  address: SPONSOR_ADDRESS,
-  abi: rail0SponsorAbi,
-  functionName: "hashSponsorship",
-  args: [userOpHash, SPONSOR_ADDR, validUntil, validAfter],
-});
-const sponsorSig = await sponsorWallet.sign({ hash: sponsorshipDigest });
+# 7. Sponsorship digest from RAIL0Sponsor
+DIGEST=$(cast call $SPONSOR \
+  "hashSponsorship(bytes32,address,uint48,uint48)(bytes32)" \
+  $USER_OP_HASH $SPONSOR_ADDR $VALID_UNTIL $VALID_AFTER \
+  --rpc-url $RPC)
 
-// 6. Patch the real signature into paymasterAndData
-userOp.paymasterAndData = pmdNoSig + sponsorSig.slice(2);
+# 8. Sponsor signs the RAW digest (no EIP-191 prefix — RAIL0Sponsor uses ecrecover directly)
+SPONSOR_SIG=$(cast wallet sign --no-hash --private-key $SPONSOR_KEY $DIGEST)
 
-// 7. Buyer signs the UserOp (account-specific scheme — passkey, ECDSA, etc.)
-userOp.signature = await buyerSmartAccount.signUserOperation(userOp);
+# 9. Patch the signature into paymasterAndData
+PMD=${PMD_NO_SIG}${SPONSOR_SIG:2}
 
-// 8. Submit. Bundler handles eth_sendUserOperation; EntryPoint validates,
-//    pays gas from RAIL0Sponsor's balance (debiting deposits[SPONSOR_ADDR]),
-//    runs the smart-account execute(), which lands inside RAIL0.authorize.
-const txHash = await bundler.sendUserOperation({ userOperation: userOp });
-console.log("UserOp submitted:", txHash);
+# 10. Buyer signs the userOpHash (SimpleAccount applies EIP-191 prefix internally)
+BUYER_SIG=$(cast wallet sign --private-key $BUYER_KEY $USER_OP_HASH)
+
+# 11. Submit via the bundler RPC
+cast rpc --rpc-url $BUNDLER_RPC eth_sendUserOperation "[
+  {
+    \"sender\": \"$BUYER_SCA\",
+    \"nonce\": \"$(cast to-hex $NONCE)\",
+    \"initCode\": \"0x\",
+    \"callData\": \"$ACCOUNT_CALL\",
+    \"accountGasLimits\": \"$ACCOUNT_GAS_LIMITS\",
+    \"preVerificationGas\": \"$(cast to-hex $PRE_VERIF_GAS)\",
+    \"gasFees\": \"$GAS_FEES\",
+    \"paymasterAndData\": \"$PMD\",
+    \"signature\": \"$BUYER_SIG\"
+  },
+  \"$ENTRY_POINT\"
+]"
 ```
 
 **What lands on chain**
@@ -535,6 +535,8 @@ console.log("UserOp submitted:", txHash);
 - Three log entries land in the same transaction: `PaymentAuthorized` (RAIL0), `Sponsored` (RAIL0Sponsor), and the EntryPoint's `UserOperationEvent`.
 
 The buyer's wallet shows: 0.1 USDC moved out, 0 native gas spent. The sponsor's `deposits[SPONSOR_ADDR]` shrinks by the actual gas cost.
+
+> The script above is verbose because ERC-4337 has many moving parts (packed gas limits, paymaster ABI, separate EntryPoint hash, account-specific signature schemes). It runs end-to-end with `cast` alone — no SDK required — but in production you'd typically use a 4337 SDK like permissionless.js, ZeroDev, or viem's account-abstraction module to handle gas estimation, smart-account quirks, and bundler retry logic.
 
 ## Development
 
