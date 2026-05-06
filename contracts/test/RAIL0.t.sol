@@ -146,6 +146,25 @@ contract MockReentrant {
     }
 }
 
+/// Mock ERC-4337 v0.7 EntryPoint (subset used by RAIL0 + tests).
+contract MockEntryPoint {
+    mapping(address => uint256) public balanceOf;
+
+    receive() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function depositTo(address account) external payable {
+        balanceOf[account] += msg.value;
+    }
+
+    function withdrawTo(address payable to, uint256 amount) external {
+        balanceOf[msg.sender] -= amount;
+        (bool ok,) = to.call{ value: amount }("");
+        require(ok, "MockEntryPoint: withdraw failed");
+    }
+}
+
 // ================================================================
 //  Test contract
 // ================================================================
@@ -153,6 +172,7 @@ contract MockReentrant {
 contract RAIL0Test is Test {
     RAIL0 internal rail0;
     MockERC20 internal token;
+    MockEntryPoint internal entryPoint;
 
     address internal payer;
     uint256 internal payerKey;
@@ -168,10 +188,11 @@ contract RAIL0Test is Test {
 
     function setUp() public {
         token = new MockERC20();
+        entryPoint = new MockEntryPoint();
 
         address[] memory accepted = new address[](1);
         accepted[0] = address(token);
-        rail0 = new RAIL0(accepted);
+        rail0 = new RAIL0(accepted, address(entryPoint));
 
         (payer, payerKey) = makeAddrAndKey("payer");
         (payee, payeeKey) = makeAddrAndKey("payee");
@@ -520,7 +541,7 @@ contract RAIL0Test is Test {
         address[] memory bad = new address[](1);
         bad[0] = address(0);
         vm.expectRevert(RAIL0.ZeroAddress.selector);
-        new RAIL0(bad);
+        new RAIL0(bad, address(entryPoint));
     }
 
     function test_Constructor_RejectsDuplicate() public {
@@ -528,7 +549,7 @@ contract RAIL0Test is Test {
         dup[0] = address(token);
         dup[1] = address(token);
         vm.expectRevert(RAIL0.DuplicateToken.selector);
-        new RAIL0(dup);
+        new RAIL0(dup, address(entryPoint));
     }
 
     function test_Constructor_AcceptsMultipleTokens() public {
@@ -536,7 +557,7 @@ contract RAIL0Test is Test {
         address[] memory tokens = new address[](2);
         tokens[0] = address(token);
         tokens[1] = address(t2);
-        RAIL0 r = new RAIL0(tokens);
+        RAIL0 r = new RAIL0(tokens, address(entryPoint));
         assertTrue(r.isAcceptedToken(address(token)));
         assertTrue(r.isAcceptedToken(address(t2)));
         assertFalse(r.isAcceptedToken(address(0xdead)));
@@ -547,12 +568,12 @@ contract RAIL0Test is Test {
         tokens[0] = address(token);
         vm.expectEmit(true, false, false, false);
         emit RAIL0.TokenAccepted(address(token));
-        new RAIL0(tokens);
+        new RAIL0(tokens, address(entryPoint));
     }
 
     function test_Constructor_AllowsEmptyList() public {
         address[] memory empty = new address[](0);
-        RAIL0 r = new RAIL0(empty);
+        RAIL0 r = new RAIL0(empty, address(entryPoint));
         assertFalse(r.isAcceptedToken(address(token)));
     }
 
@@ -644,7 +665,7 @@ contract RAIL0Test is Test {
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
-        RAIL0 other = new RAIL0(tokens);
+        RAIL0 other = new RAIL0(tokens, address(entryPoint));
         bytes32 h2 = other.hashPayment(p);
 
         assertTrue(h1 != h2, "hashes must differ across deployments (different verifyingContract)");
@@ -731,7 +752,7 @@ contract RAIL0Test is Test {
         MockUSDT usdt = new MockUSDT();
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdt);
-        RAIL0 r = new RAIL0(tokens);
+        RAIL0 r = new RAIL0(tokens, address(entryPoint));
 
         usdt.mint(payer, 1000e6);
         vm.prank(payer);
@@ -749,7 +770,7 @@ contract RAIL0Test is Test {
         MockBadReturn bad = new MockBadReturn();
         address[] memory tokens = new address[](1);
         tokens[0] = address(bad);
-        RAIL0 r = new RAIL0(tokens);
+        RAIL0 r = new RAIL0(tokens, address(entryPoint));
 
         RAIL0.Payment memory p = _payment();
         p.token = address(bad);
@@ -766,7 +787,7 @@ contract RAIL0Test is Test {
         MockReentrant evil = new MockReentrant();
         address[] memory tokens = new address[](1);
         tokens[0] = address(evil);
-        RAIL0 r = new RAIL0(tokens);
+        RAIL0 r = new RAIL0(tokens, address(entryPoint));
 
         RAIL0.Payment memory p = _payment();
         p.token = address(evil);
