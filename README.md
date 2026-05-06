@@ -10,12 +10,13 @@ Payment rails should be open like the rest of the internet. That is the mission.
 
 ## Supported chains
 
-RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality**. Concretely:
+RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality**, accepting tokens that implement **EIP-3009 (`transferWithAuthorization`)**. Concretely:
 
 - **EVM-compatible.** Solidity 0.8.27 must compile and execute on the chain.
 - **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Merchants pay gas in the same asset they're settling in — no second gas-token to manage.
 - **L1 sovereignty.** No sequencer dependency, no withdrawal delays, no inherited security from another chain.
 - **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times.
+- **EIP-3009-capable tokens.** Each accepted token must expose `transferWithAuthorization` so the buyer can authorize transfers off-chain. USDC supports EIP-3009 on every chain; Plasma's USDT0 supports it; some legacy USDT deployments don't.
 
 Currently targeted:
 
@@ -30,7 +31,7 @@ Chains explicitly NOT supported: anything without stablecoin-native gas (Ethereu
 
 ## Protocol
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a meta-transaction pattern: the buyer signs an EIP-712 `AuthorizeIntent` or `ChargeIntent` off-chain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. The buyer never has to broadcast a transaction or hold the chain's gas asset.
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a single off-chain signature: the buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. No allowance is granted, no separate intent typehash, no token approval — one signature, one transaction, no broadcasted setup from the buyer.
 
 ### Lifecycle
 
@@ -43,14 +44,17 @@ function authorize(
     bytes32 paymentId,
     Payment calldata p,
     uint256 amount,
-    uint48 deadline,
-    bytes calldata buyerSig
+    uint256 validAfter,
+    uint256 validBefore,
+    uint8 v,
+    bytes32 r,
+    bytes32 s
 ) external;
 ```
 
 Buyer escrows `amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-The buyer signs an EIP-712 `AuthorizeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` off-chain. Anyone — typically the merchant — submits this transaction. The contract validates the config (expiries in order, fee within bounds, addresses non-zero, token in the deployment's allowlist), checks that `0 < amount ≤ p.maxAmount` and `block.timestamp < p.preApprovalExpiry`, recomputes the configHash from the supplied Payment, recovers the signer of the `AuthorizeIntent` digest, and requires it to equal `p.payer`. The signature also commits the buyer to the exact Payment terms — a merchant can't substitute different terms and still pull from the buyer's wallet. The contract stores the configHash, sets `capturableAmount = amount`, and pulls tokens via `transferFrom`. The buyer must have approved RAIL0 on the token beforehand, or `permitAndAuthorize` bundles the permit grant in the same call. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, `reclaim` opens after `authorizationExpiry`.
+The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = amount`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits this transaction. The contract validates the config (expiries in order, fee within bounds, addresses non-zero, token in the deployment's allowlist), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce. The token's own EIP-712 sig check verifies the buyer's signature; if anything was tampered (different Payment terms, different amount, different recipient), the recovered signer won't match `p.payer` and the token reverts. The deterministic-nonce trick is what binds the buyer's signature to the exact Payment terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, `reclaim` opens after `authorizationExpiry`.
 
 #### Charge
 
@@ -59,14 +63,17 @@ function charge(
     bytes32 paymentId,
     Payment calldata p,
     uint256 amount,
-    uint48 deadline,
-    bytes calldata buyerSig
+    uint256 validAfter,
+    uint256 validBefore,
+    uint8 v,
+    bytes32 r,
+    bytes32 s
 ) external;
 ```
 
 Buyer authorizes and pays through in a single call — no escrow hold.
 
-Same submission pattern as `authorize` (buyer signs off-chain, anyone submits) but the buyer signs `ChargeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` instead — a distinct typehash so an `AuthorizeIntent` signature cannot be used to call `charge` or vice versa. Preconditions are otherwise identical (fresh `paymentId`, valid amount, before `preApprovalExpiry`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
+Same EIP-3009 pattern as `authorize`, but the contract derives the nonce with `_CHARGE_NONCE_PREFIX` instead. A buyer's authorize-signature cannot be used to call `charge` (and vice versa) because the two derived nonces differ — the token would compute a different nonce when verifying and the recovered signer would not match. Preconditions are otherwise identical (fresh `paymentId`, valid amount, before `preApprovalExpiry`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
 
 #### Capture
 
@@ -106,30 +113,7 @@ function refund(bytes32 paymentId, Payment calldata p, uint256 amount) external;
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
 
-Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ refundableAmount`. State is updated: `refundableAmount -= amount`. Captured funds live in the merchant's wallet (not the contract), so `refund` calls `transferFrom(payee, payer, amount)` — **the merchant must keep an ERC-20 allowance to RAIL0 of at least `amount`**, or supply a permit signature via `permitAndRefund`. The merchant doesn't need any allowance for the happy path (`capture` distributes from contract-held escrow), only at refund time, so this requirement is easy to forget at integration time. Multiple partial refunds are supported up to the cumulative `refundableAmount`.
-
-#### Permit-bundled variants
-
-```solidity
-function permitAndAuthorize(
-    bytes32 paymentId, Payment calldata p, uint256 amount, uint48 deadline, bytes calldata buyerSig,
-    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
-) external;
-
-function permitAndCharge(
-    bytes32 paymentId, Payment calldata p, uint256 amount, uint48 deadline, bytes calldata buyerSig,
-    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
-) external;
-
-function permitAndRefund(
-    bytes32 paymentId, Payment calldata p, uint256 amount,
-    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
-) external;
-```
-
-Each transfer-pulling operation has a permit-bundled variant that calls `IERC20Permit.permit(...)` first, eliminating the separate approval transaction. The `permit` call is wrapped in `try/catch` and its failure is swallowed — the wrapper degrades gracefully on tokens that don't implement EIP-2612, on signatures that have been front-run (nonce advanced), and on callers who already have standing approval. If neither path provides allowance, the inner transfer reverts with the token's allowance error.
-
-For the buyer-side wrappers (`permitAndAuthorize` / `permitAndCharge`), the buyer signs **two** things off-chain: the EIP-2612 token permit (over the token's domain) and the RAIL0 intent (`AuthorizeIntent` / `ChargeIntent` over RAIL0's domain). Anyone submits both as one transaction. For the merchant-side wrapper (`permitAndRefund`), the merchant signs the token permit and submits the call themselves (`msg.sender == p.payee` required, no buyer involvement).
+Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ refundableAmount`. State is updated: `refundableAmount -= amount`. Captured funds live in the merchant's wallet (not the contract), so `refund` calls `transferFrom(payee, payer, amount)` — **the merchant must keep an ERC-20 allowance to RAIL0 of at least `amount`**. The merchant is the on-chain submitter here, so they manage their own approval (typically `token.approve(rail0, max)` once at onboarding); no off-chain authorization signature is needed because they're broadcasting the tx anyway.
 
 ### The `Payment` struct
 
@@ -137,7 +121,7 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 
 | Field                  | Type      | Meaning                                                          |
 |------------------------|-----------|------------------------------------------------------------------|
-| `payer`                | `address` | Buyer. Source of escrowed funds; signer of `AuthorizeIntent` / `ChargeIntent` off-chain. |
+| `payer`                | `address` | Buyer. Source of escrowed funds; signer of the EIP-3009 `TransferWithAuthorization` off-chain. |
 | `payee`                | `address` | Merchant. Calls `capture`, `void`, `refund`. Recipient of captured funds. |
 | `token`                | `address` | ERC-20 stablecoin. Must be in the deployment's allowlist.        |
 | `maxAmount`            | `uint120` | Upper bound on the amount the buyer can authorize.               |
@@ -170,30 +154,32 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="2", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="3", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
-Buyer-initiated intents are EIP-712 typed data over the same domain:
+Buyer-initiated operations don't introduce a separate RAIL0-domain signing typehash. Instead, RAIL0 derives a deterministic EIP-3009 nonce from the operation context:
 
-- `AuthorizeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` — buyer signs to authorize a subsequent `authorize` call.
-- `ChargeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` — same shape, distinct typehash, used for `charge`.
+```
+authorizeNonce = keccak256(keccak256("RAIL0.AUTHORIZE"), paymentId, configHash)
+chargeNonce    = keccak256(keccak256("RAIL0.CHARGE"),    paymentId, configHash)
+```
 
-Including `configHash` in the signed payload binds the buyer's authorization to the exact Payment terms — substituting different terms invalidates the signature.
+The buyer signs the token's standard `TransferWithAuthorization` digest with this nonce. The merchant submits, RAIL0 recomputes the nonce from the supplied Payment, and calls `token.transferWithAuthorization(...)`. If the merchant tampered with any Payment field, the recomputed nonce differs, the recovered signer differs from `p.payer`, and the token reverts. The configHash inside the nonce derivation provides the same term-binding that an EIP-712 intent typehash would, without needing one.
+
+Distinct prefixes ensure an authorize-signature can't be reused for charge — the nonces don't match.
 
 The domain separator is cached at construction and rebuilt automatically if `block.chainid` changes (chain-fork safety). Helpers exposed to off-chain signers:
 
-- `DOMAIN_SEPARATOR()` — current EIP-712 domain separator.
+- `DOMAIN_SEPARATOR()` — current EIP-712 domain separator (used only for `Payment` hashing; the buyer signs over the *token's* domain).
 - `hashPayment(p)` — Payment digest (also stored on-chain as configHash).
-- `hashAuthorizeIntent(paymentId, configHash, amount, deadline)` — digest the buyer signs for `authorize`.
-- `hashChargeIntent(paymentId, configHash, amount, deadline)` — digest the buyer signs for `charge`.
+- `authorizeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `authorize`.
+- `chargeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `charge`.
 
 ### Allowance requirements
 
-RAIL0 does not custody anything outside the active escrow window. Two parties may need to grant allowances on the underlying ERC-20:
+RAIL0 does not custody anything outside the active escrow window. Token approvals work asymmetrically between the two parties:
 
-- **Buyer.** Must approve RAIL0 (or sign a permit) so the contract can pull escrow at `authorize`/`charge` time. Note: this is an *ERC-20 allowance on the token contract*, not on RAIL0. The buyer's `AuthorizeIntent` / `ChargeIntent` signature authorizes RAIL0 to *call `transferFrom`*; the token's allowance gates whether that call succeeds.
-- **Merchant.** Must approve RAIL0 (or sign a permit) before `refund` so the contract can pull captured funds back from the merchant's wallet. This is non-obvious — the merchant never needs an allowance during the happy path (`capture` distributes from contract-held escrow), only at refund time.
-
-The `permitAnd*` wrappers bundle the relevant token permit, removing the standing-approval requirement on tokens that implement EIP-2612.
+- **Buyer.** **No allowance grant ever happens.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to RAIL0 atomically based on the buyer's signature alone. The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
+- **Merchant.** Must approve RAIL0 once on the token before issuing refunds (`refund` calls `transferFrom(payee, payer, amount)`). The merchant is the on-chain submitter for refund anyway, so they manage their own approval — typically `token.approve(rail0, max)` once at onboarding. Not needed for `capture` / `void` / `reclaim` (those distribute or move funds RAIL0 already holds).
 
 ### Events
 
@@ -217,8 +203,6 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | Error                       | Cause                                                              |
 |-----------------------------|--------------------------------------------------------------------|
 | `NotPayee`                  | Caller is not the merchant for a merchant-only operation.          |
-| `InvalidAuthorization`      | Buyer signature missing, malformed, or doesn't match `p.payer` over the supplied terms. |
-| `AuthorizationDeadlineExpired` | `block.timestamp > deadline` on a buyer intent signature.       |
 | `PaymentAlreadyExists`      | `paymentId` was already used.                                      |
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
@@ -251,7 +235,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `reclaim` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 56-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the lifecycle, allowlist construction, every revert path, EIP-712 hashing, intent signature verification (wrong signer, tampered amount, tampered Payment, expired deadline, wrong intent type), permit wrappers (success + fallback), reentrancy attempts via a malicious mock token, USDT-style non-returning tokens, and the public `reclaim` path. No external audit has been performed.
+- **Test coverage.** A 51-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the lifecycle, allowlist construction, every revert path, EIP-712 hashing, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix), reentrancy attempts via a malicious mock token, and the public `reclaim` path. No external audit has been performed.
 
 ### Limits
 
@@ -271,7 +255,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 There is no separate sponsorship layer in RAIL0. Sponsorship is just "the merchant submits the transaction" — the meta-transaction pattern handles it for free.
 
-The mechanics: the buyer signs an `AuthorizeIntent` or `ChargeIntent` off-chain. The merchant (or any third party) takes that signature plus the Payment terms and submits a regular Ethereum transaction calling `authorize` / `charge`. The submitter is the `tx.origin`, so the submitter pays gas natively in the chain's gas asset. On stablecoin-gas chains, that's the same stablecoin the merchant is settling in — no second asset to manage.
+The mechanics: the buyer signs an EIP-3009 `TransferWithAuthorization` over the token's domain off-chain. The merchant (or any third party) takes that signature plus the Payment terms and submits a regular Ethereum transaction calling `authorize` / `charge`. The submitter is the `tx.origin`, so the submitter pays gas natively in the chain's gas asset. On stablecoin-gas chains, that's the same stablecoin the merchant is settling in — no second asset to manage.
 
 **Who can sponsor?**
 
@@ -303,8 +287,8 @@ export TOKEN=0x...                  # an accepted stablecoin
 export PAYER=0x...                  # buyer wallet
 export PAYEE=0x...                  # merchant wallet
 export FEE_RCV=0x...                # fee receiver (or 0x0 if feeBps == 0)
-export PAYER_KEY=0x...              # buyer signing key (signs AuthorizeIntent / ChargeIntent off-chain)
-export PAYEE_KEY=0x...              # merchant signing key (submits txs, also signs token permits for refund)
+export PAYER_KEY=0x...              # buyer signing key (signs EIP-3009 TransferWithAuthorization off-chain)
+export PAYEE_KEY=0x...              # merchant signing key (submits txs)
 ```
 
 The `Payment` struct is a 9-field tuple. Define it once and reuse:
@@ -316,43 +300,55 @@ export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint48,uint1
 export PAYMENT_ID=$(cast keccak "order-12345")
 ```
 
-### One-time approvals
+### One-time merchant approval
 
-Buyer grants RAIL0 the right to pull tokens for `authorize` / `charge`:
-
-```sh
-cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
-  --rpc-url $RPC --private-key $PAYER_KEY
-```
-
-Merchant grants RAIL0 the right to pull tokens for `refund`:
+The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant approves RAIL0 once so refunds can pull from their wallet:
 
 ```sh
 cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Authorize (buyer signs, merchant submits)
+### Authorize (buyer signs EIP-3009, merchant submits)
 
-The buyer signs an `AuthorizeIntent` off-chain. The merchant submits the transaction and pays gas.
+The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's domain. The merchant submits and pays gas. In production a wallet SDK handles the EIP-712 signing; the cast equivalent below builds the digest manually.
 
 ```sh
-# 1. Compute the digest the buyer needs to sign
+# 1. Compute the deterministic EIP-3009 nonce that RAIL0 expects
 CONFIG_HASH=$(cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC)
-DEADLINE=$(($(date +%s) + 600))   # 10 minutes
-DIGEST=$(cast call $RAIL0 "hashAuthorizeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH 100000000 $DEADLINE --rpc-url $RPC)
+NONCE=$(cast call $RAIL0 "authorizeNonce(bytes32,bytes32)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
 
-# 2. Buyer signs the raw digest (no EIP-191 prefix — RAIL0 uses ecrecover directly)
-BUYER_SIG=$(cast wallet sign --no-hash --private-key $PAYER_KEY $DIGEST)
+# 2. Pick a validity window
+VALID_AFTER=0
+VALID_BEFORE=$(($(date +%s) + 600))   # 10 minutes from now
+AMOUNT=100000000                       # 100 USDC at 6 decimals
 
-# 3. Merchant submits the transaction and pays gas
-cast send $RAIL0 "authorize(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $BUYER_SIG \
+# 3. Build the EIP-3009 TransferWithAuthorization digest (over the TOKEN's domain)
+TOKEN_DOMAIN=$(cast call $TOKEN "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC)
+TWA_TYPEHASH=$(cast keccak \
+  "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+STRUCT_HASH=$(cast keccak $(cast abi-encode \
+  "f(bytes32,address,address,uint256,uint256,uint256,bytes32)" \
+  $TWA_TYPEHASH $PAYER $RAIL0 $AMOUNT $VALID_AFTER $VALID_BEFORE $NONCE))
+DIGEST=$(cast keccak 0x1901${TOKEN_DOMAIN:2}${STRUCT_HASH:2})
+
+# 4. Buyer signs the raw digest
+SIG=$(cast wallet sign --no-hash --private-key $PAYER_KEY $DIGEST)
+
+# 5. Split into v, r, s for the call
+R=0x${SIG:2:64}
+S=0x${SIG:66:64}
+V=0x${SIG:130:2}
+
+# 6. Merchant submits the transaction and pays gas
+cast send $RAIL0 \
+  "authorize(bytes32,$PAYMENT_TYPE,uint256,uint256,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" $AMOUNT $VALID_AFTER $VALID_BEFORE $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-In production, the buyer's wallet (Metamask, Rabby, hardware) signs typed data via the wallet's `eth_signTypedData_v4`, which renders the fields in the wallet UI. The `cast wallet sign --no-hash` invocation here is the equivalent for terminal flows.
+In production, the buyer's wallet (Metamask, Rabby, hardware) renders this as a standard EIP-3009 `TransferWithAuthorization` prompt and signs via `eth_signTypedData_v4`. No separate intent typehash is needed — the deterministic nonce binds the signature to the Payment terms.
 
 ### Capture (merchant)
 
@@ -370,7 +366,7 @@ cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
 
 ### Refund (merchant)
 
-Pulls from merchant's own wallet back to buyer. Requires the merchant's standing ERC-20 approval (or use `permitAndRefund`):
+Pulls from merchant's own wallet back to buyer. Requires the merchant's standing ERC-20 approval set up at onboarding (see [One-time merchant approval](#one-time-merchant-approval)).
 
 ```sh
 cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
@@ -378,17 +374,18 @@ cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Charge (buyer signs, merchant submits — one-shot pay-through)
+### Charge (buyer signs EIP-3009, merchant submits — one-shot pay-through)
 
-Skip escrow; pay merchant immediately. Refunds remain available until `refundExpiry`. Buyer signs `ChargeIntent` (distinct from `AuthorizeIntent`):
+Skip escrow; pay merchant immediately. Refunds remain available until `refundExpiry`. Identical pattern to Authorize but the buyer derives the nonce with `chargeNonce` instead of `authorizeNonce` (so an authorize-signature can't be repurposed for charge):
 
 ```sh
-DIGEST=$(cast call $RAIL0 "hashChargeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH 100000000 $DEADLINE --rpc-url $RPC)
-BUYER_SIG=$(cast wallet sign --no-hash --private-key $PAYER_KEY $DIGEST)
+NONCE=$(cast call $RAIL0 "chargeNonce(bytes32,bytes32)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
 
-cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $BUYER_SIG \
+# Build digest with the new nonce, sign, split, then:
+cast send $RAIL0 \
+  "charge(bytes32,$PAYMENT_TYPE,uint256,uint256,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" $AMOUNT $VALID_AFTER $VALID_BEFORE $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
@@ -413,22 +410,6 @@ cast send $RAIL0 "reclaim(bytes32,$PAYMENT_TYPE)" \
   --rpc-url $RPC --private-key $RELAYER_KEY
 ```
 
-### Permit-bundled variants
-
-The buyer-side wrappers take **two** signatures: the buyer's `AuthorizeIntent` / `ChargeIntent` signature plus the EIP-2612 token permit (which the token's wallet/SDK produces from its own domain separator and nonce):
-
-```sh
-# AUTH_SIG is the buyer's intent signature (computed as in "Authorize" above)
-# PERMIT_V/R/S come from signing the token's EIP-2612 permit struct off-chain
-cast send $RAIL0 \
-  "permitAndAuthorize(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes,uint256,uint8,bytes32,bytes32)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $AUTH_SIG \
-  $PERMIT_DEADLINE $PERMIT_V $PERMIT_R $PERMIT_S \
-  --rpc-url $RPC --private-key $PAYEE_KEY
-```
-
-Same shape for `permitAndCharge`. `permitAndRefund` is merchant-only (no buyer involvement, just the merchant's token permit + their submission).
-
 ### Reading state
 
 Payment state (returns `(bool exists, uint120 capturable, uint120 refundable)`):
@@ -445,19 +426,19 @@ cast call $RAIL0 "getConfigHash(bytes32)(bytes32)" \
   $PAYMENT_ID --rpc-url $RPC
 ```
 
-Compute EIP-712 digests the contract uses:
+Compute the digests and nonces the contract uses:
 
 ```sh
-# Payment digest (matches getConfigHash after authorize)
+# Payment EIP-712 digest (matches getConfigHash after authorize)
 cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC
 
-# Buyer's authorize-intent digest
-cast call $RAIL0 "hashAuthorizeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH $AMOUNT $DEADLINE --rpc-url $RPC
+# EIP-3009 nonce for an `authorize` call
+cast call $RAIL0 "authorizeNonce(bytes32,bytes32)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC
 
-# Buyer's charge-intent digest
-cast call $RAIL0 "hashChargeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH $AMOUNT $DEADLINE --rpc-url $RPC
+# EIP-3009 nonce for a `charge` call
+cast call $RAIL0 "chargeNonce(bytes32,bytes32)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC
 ```
 
 Domain separator and allowlist check:

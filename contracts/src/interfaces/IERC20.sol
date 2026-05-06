@@ -16,17 +16,25 @@ interface IERC20 {
     event Approval(address indexed owner, address indexed spender, uint256 amount);
 }
 
-/// @title IERC20Permit — EIP-2612 permit interface.
-/// @dev   Optional. Tokens without permit cause `permitAnd*` wrappers to skip the
-///        permit step (caught via try/catch) and fall back to standing approval.
-interface IERC20Permit {
-    function permit(
-        address owner,
-        address spender,
+/// @title IEIP3009 — Subset of EIP-3009 (TransferWithAuthorization) used by RAIL0.
+/// @dev   Buyer-initiated payments require this interface on the token. The buyer signs
+///        an EIP-712 `TransferWithAuthorization` digest off-chain; RAIL0 calls
+///        `transferWithAuthorization` to pull funds. No allowance state is touched.
+///        USDC supports EIP-3009 on every chain it deploys to. Plasma's USDT0 supports it.
+interface IEIP3009 {
+    function transferWithAuthorization(
+        address from,
+        address to,
         uint256 value,
-        uint256 deadline,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
         uint8 v,
         bytes32 r,
         bytes32 s
     ) external;
+
+    function authorizationState(address authorizer, bytes32 nonce) external view returns (bool);
+
+    event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
 }

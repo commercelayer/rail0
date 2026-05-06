@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { IERC20, IERC20Permit } from "./interfaces/IERC20.sol";
+import { IERC20, IEIP3009 } from "./interfaces/IERC20.sol";
 
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
 /// @notice Authorize, capture, void, reclaim, and refund stablecoin payments on any
-///         EVM-compatible chain. Buyer-initiated operations (`authorize`, `charge`)
-///         use off-chain EIP-712 authorizations: the buyer signs an intent, anyone
-///         (typically the merchant) submits the transaction and pays gas natively.
+///         EVM-compatible chain whose accepted tokens implement EIP-3009
+///         (`transferWithAuthorization`). Buyer-initiated operations use a single
+///         EIP-3009 signature: the buyer signs off-chain, anyone (typically the
+///         merchant) submits the transaction and pays gas natively. The buyer never
+///         broadcasts a transaction and no token allowance state is touched.
 /// @dev    No owner, no admin, no upgradeability. The token allowlist is set in the
 ///         constructor and immutable thereafter.
 contract RAIL0 {
@@ -15,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    uint256 public constant VERSION = 2;
+    uint256 public constant VERSION = 3;
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -29,16 +31,13 @@ contract RAIL0 {
         "Payment(address payer,address payee,address token,uint120 maxAmount,uint48 preApprovalExpiry,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
     );
 
-    /// @dev Buyer signs this off-chain to authorize a subsequent `authorize` call.
-    bytes32 internal constant _AUTHORIZE_INTENT_TYPEHASH =
-        keccak256("AuthorizeIntent(bytes32 paymentId,bytes32 configHash,uint256 amount,uint48 deadline)");
-
-    /// @dev Buyer signs this off-chain to authorize a subsequent `charge` call.
-    bytes32 internal constant _CHARGE_INTENT_TYPEHASH =
-        keccak256("ChargeIntent(bytes32 paymentId,bytes32 configHash,uint256 amount,uint48 deadline)");
+    /// @dev Prefixes used to derive EIP-3009 nonces. Including a per-operation prefix
+    ///      ensures an authorize signature can't be reused for charge (and vice versa).
+    bytes32 internal constant _AUTHORIZE_NONCE_PREFIX = keccak256("RAIL0.AUTHORIZE");
+    bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
-    bytes32 internal constant _VERSION_HASH = keccak256(bytes("2"));
+    bytes32 internal constant _VERSION_HASH = keccak256(bytes("3"));
 
     /// @dev Reentrancy lock states.
     uint256 private constant _NOT_ENTERED = 1;
@@ -86,6 +85,7 @@ contract RAIL0 {
 
     /// @param acceptedTokens Token addresses this deployment will accept on `Payment.token`.
     ///                       Each entry must be non-zero and unique. The list is fixed forever.
+    ///                       Tokens MUST implement EIP-3009 (`transferWithAuthorization`).
     constructor(address[] memory acceptedTokens) {
         _CACHED_CHAIN_ID = block.chainid;
         _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
@@ -108,7 +108,7 @@ contract RAIL0 {
     struct Payment {
         address payer;               // buyer — funds are pulled from this address
         address payee;               // merchant — calls capture, void, refund
-        address token;               // ERC-20 token (must be in this deployment's allowlist)
+        address token;               // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
         uint120 maxAmount;           // upper bound on what can be authorized
         uint48  preApprovalExpiry;   // cutoff for authorize/charge
         uint48  authorizationExpiry; // cutoff for capture; reclaim opens after
@@ -179,83 +179,109 @@ contract RAIL0 {
     error DuplicateToken();
     error TransferFailed();
     error Reentrancy();
-    error InvalidAuthorization();
-    error AuthorizationDeadlineExpired();
 
     // ================================================================
-    //  Buyer-initiated operations (off-chain auth, anyone submits)
+    //  Buyer-initiated operations (EIP-3009 signed off-chain, anyone submits)
     // ================================================================
 
     /// @notice Authorize funds: pull `amount` from buyer into escrow.
-    /// @dev    The buyer signs `AuthorizeIntent(paymentId, configHash, amount, deadline)`
-    ///         off-chain. Anyone — typically the merchant — submits this transaction and
-    ///         pays gas. The buyer's wallet never broadcasts a transaction.
+    /// @dev    The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's
+    ///         domain with `from = p.payer`, `to = address(this)`, `value = amount`,
+    ///         and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
+    ///         The nonce derivation binds the signature to specific Payment terms — a
+    ///         merchant cannot substitute different terms and reuse the signature.
+    ///         Anyone may submit this transaction; the submitter pays gas.
     function authorize(
         bytes32 paymentId,
         Payment calldata p,
         uint256 amount,
-        uint48 deadline,
-        bytes calldata buyerSig
+        uint256 validAfter,
+        uint256 validBefore,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external nonReentrant {
-        _verifyIntent(_AUTHORIZE_INTENT_TYPEHASH, paymentId, p, amount, deadline, buyerSig);
-        _authorize(paymentId, p, amount);
-    }
+        if (_state[paymentId].exists) revert PaymentAlreadyExists();
+        _validatePayment(p, amount);
 
-    /// @notice `authorize` preceded by an EIP-2612 token permit grant from the buyer.
-    /// @dev    Buyer signs both the `AuthorizeIntent` and the token permit; merchant submits.
-    ///         The permit call is wrapped in `try/catch` and degrades gracefully on tokens
-    ///         without EIP-2612 or when the buyer already has standing approval.
-    function permitAndAuthorize(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint48 deadline,
-        bytes calldata buyerSig,
-        uint256 permitDeadline,
-        uint8 permitV,
-        bytes32 permitR,
-        bytes32 permitS
-    ) external nonReentrant {
-        _verifyIntent(_AUTHORIZE_INTENT_TYPEHASH, paymentId, p, amount, deadline, buyerSig);
-        try IERC20Permit(p.token).permit(p.payer, address(this), amount, permitDeadline, permitV, permitR, permitS) {} catch {}
-        _authorize(paymentId, p, amount);
+        bytes32 configHash = _hash(p);
+        _configHash[paymentId] = configHash;
+        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
+        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
+        _state[paymentId] = PaymentState({
+            exists: true,
+            capturableAmount: amount120,
+            refundableAmount: 0
+        });
+
+        // EIP-3009 pulls funds — token verifies the buyer's signature. Tampering with
+        // any Payment field changes the configHash, which changes the nonce, which
+        // makes the recovered signer differ from `p.payer`, causing the token to revert.
+        IEIP3009(p.token).transferWithAuthorization(
+            p.payer,
+            address(this),
+            amount,
+            validAfter,
+            validBefore,
+            _authorizeNonce(paymentId, configHash),
+            v,
+            r,
+            s
+        );
+
+        emit PaymentAuthorized(paymentId, p.payer, p.payee, p, amount);
     }
 
     /// @notice One-shot: authorize and immediately capture (no hold).
-    /// @dev    Buyer signs `ChargeIntent(paymentId, configHash, amount, deadline)`.
+    /// @dev    Same EIP-3009 pattern as `authorize`, but the nonce uses
+    ///         `_CHARGE_NONCE_PREFIX` so an authorize-signature can't be repurposed
+    ///         for charge (and vice versa). After the buyer's funds reach RAIL0, the
+    ///         contract immediately distributes to `payee` + `feeReceiver`.
     function charge(
         bytes32 paymentId,
         Payment calldata p,
         uint256 amount,
-        uint48 deadline,
-        bytes calldata buyerSig
+        uint256 validAfter,
+        uint256 validBefore,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external nonReentrant {
-        _verifyIntent(_CHARGE_INTENT_TYPEHASH, paymentId, p, amount, deadline, buyerSig);
-        _charge(paymentId, p, amount);
-    }
+        if (_state[paymentId].exists) revert PaymentAlreadyExists();
+        _validatePayment(p, amount);
 
-    /// @notice `charge` preceded by an EIP-2612 token permit grant from the buyer.
-    function permitAndCharge(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint48 deadline,
-        bytes calldata buyerSig,
-        uint256 permitDeadline,
-        uint8 permitV,
-        bytes32 permitR,
-        bytes32 permitS
-    ) external nonReentrant {
-        _verifyIntent(_CHARGE_INTENT_TYPEHASH, paymentId, p, amount, deadline, buyerSig);
-        try IERC20Permit(p.token).permit(p.payer, address(this), amount, permitDeadline, permitV, permitR, permitS) {} catch {}
-        _charge(paymentId, p, amount);
+        bytes32 configHash = _hash(p);
+        _configHash[paymentId] = configHash;
+        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
+        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
+        _state[paymentId] = PaymentState({
+            exists: true,
+            capturableAmount: 0,
+            refundableAmount: amount120
+        });
+
+        IEIP3009(p.token).transferWithAuthorization(
+            p.payer,
+            address(this),
+            amount,
+            validAfter,
+            validBefore,
+            _chargeNonce(paymentId, configHash),
+            v,
+            r,
+            s
+        );
+
+        _distribute(p, amount);
+
+        emit PaymentCharged(paymentId, p.payer, p.payee, p, amount);
     }
 
     /// @notice Buyer's safety net: reclaim escrowed funds after authorizationExpiry.
     /// @dev    Anyone can call this — funds always go to `p.payer` regardless of submitter,
     ///         so there is no theft potential. A buyer who has been ghosted by the merchant
-    ///         doesn't need to hold gas; a relayer or watchdog service can submit the
-    ///         reclaim on their behalf.
+    ///         doesn't need to hold the chain's gas asset to recover their funds; a relayer
+    ///         or watchdog service can submit on their behalf.
     function reclaim(bytes32 paymentId, Payment calldata p) external nonReentrant {
         PaymentState memory s = _loadAndVerify(paymentId, p);
         if (block.timestamp < p.authorizationExpiry) revert AuthorizationNotExpired();
@@ -307,24 +333,22 @@ contract RAIL0 {
     /// @notice Refund a previously captured amount from the merchant's wallet.
     /// @dev    Captured funds live in the payee's wallet, not in this contract. Refund
     ///         pulls them back via `transferFrom`, so the payee MUST maintain an ERC-20
-    ///         allowance to this contract on `p.token` of at least `amount`. Use
-    ///         `permitAndRefund` to provide the allowance via signature in the same tx.
+    ///         allowance to this contract on `p.token` of at least `amount`. The merchant
+    ///         is the on-chain submitter here, so they can manage their own approval —
+    ///         no off-chain authorization signature is needed.
     function refund(bytes32 paymentId, Payment calldata p, uint256 amount) external nonReentrant {
-        _refund(paymentId, p, amount);
-    }
+        if (msg.sender != p.payee) revert NotPayee();
+        PaymentState memory s = _loadAndVerify(paymentId, p);
+        if (block.timestamp >= p.refundExpiry) revert RefundExpired();
+        if (amount == 0 || amount > s.refundableAmount) revert InvalidRefundAmount();
 
-    /// @notice `refund` preceded by an EIP-2612 token permit grant from the merchant.
-    function permitAndRefund(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint256 permitDeadline,
-        uint8 permitV,
-        bytes32 permitR,
-        bytes32 permitS
-    ) external nonReentrant {
-        try IERC20Permit(p.token).permit(p.payee, address(this), amount, permitDeadline, permitV, permitR, permitS) {} catch {}
-        _refund(paymentId, p, amount);
+        // Safe cast: amount <= refundableAmount (uint120) checked above.
+        uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
+        _state[paymentId].refundableAmount = s.refundableAmount - refundAmount120;
+
+        _safeTransferFrom(p.token, p.payee, p.payer, amount);
+
+        emit PaymentRefunded(paymentId, p.payer, p.payee, amount);
     }
 
     // ================================================================
@@ -351,22 +375,16 @@ contract RAIL0 {
         return _hash(p);
     }
 
-    /// @notice Computes the EIP-712 digest the buyer signs to authorize an `authorize` call.
-    function hashAuthorizeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)
-        external
-        view
-        returns (bytes32)
-    {
-        return _intentDigest(_AUTHORIZE_INTENT_TYPEHASH, paymentId, configHash, amount, deadline);
+    /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
+    ///         `TransferWithAuthorization` for an `authorize` call.
+    function authorizeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
+        return _authorizeNonce(paymentId, configHash);
     }
 
-    /// @notice Computes the EIP-712 digest the buyer signs to authorize a `charge` call.
-    function hashChargeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)
-        external
-        view
-        returns (bytes32)
-    {
-        return _intentDigest(_CHARGE_INTENT_TYPEHASH, paymentId, configHash, amount, deadline);
+    /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
+    ///         `TransferWithAuthorization` for a `charge` call.
+    function chargeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
+        return _chargeNonce(paymentId, configHash);
     }
 
     /// @notice Returns the EIP-712 domain separator for this contract on the current chain.
@@ -375,97 +393,15 @@ contract RAIL0 {
     }
 
     // ================================================================
-    //  Internal helpers — intent verification
+    //  Internal helpers
     // ================================================================
 
-    function _verifyIntent(
-        bytes32 typehash,
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint48 deadline,
-        bytes calldata sig
-    ) internal view {
-        if (block.timestamp > deadline) revert AuthorizationDeadlineExpired();
-        bytes32 configHash = _hash(p);
-        bytes32 digest = _intentDigest(typehash, paymentId, configHash, amount, deadline);
-        if (_recoverSigner(digest, sig) != p.payer) revert InvalidAuthorization();
+    function _authorizeNonce(bytes32 paymentId, bytes32 configHash) internal pure returns (bytes32) {
+        return keccak256(abi.encode(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash));
     }
 
-    function _intentDigest(
-        bytes32 typehash,
-        bytes32 paymentId,
-        bytes32 configHash,
-        uint256 amount,
-        uint48 deadline
-    ) internal view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(typehash, paymentId, configHash, amount, deadline));
-        return keccak256(abi.encodePacked(hex"1901", _domainSeparator(), structHash));
-    }
-
-    function _recoverSigner(bytes32 digest, bytes calldata sig) internal pure returns (address) {
-        if (sig.length != 65) return address(0);
-        bytes32 r = bytes32(sig[0:32]);
-        bytes32 s = bytes32(sig[32:64]);
-        uint8 v = uint8(sig[64]);
-        if (v < 27) v += 27;
-        return ecrecover(digest, v, r, s);
-    }
-
-    // ================================================================
-    //  Internal helpers — lifecycle
-    // ================================================================
-
-    function _authorize(bytes32 paymentId, Payment calldata p, uint256 amount) internal {
-        if (_state[paymentId].exists) revert PaymentAlreadyExists();
-        _validatePayment(p, amount);
-
-        _configHash[paymentId] = _hash(p);
-        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
-        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({
-            exists: true,
-            capturableAmount: amount120,
-            refundableAmount: 0
-        });
-
-        _safeTransferFrom(p.token, p.payer, address(this), amount);
-
-        emit PaymentAuthorized(paymentId, p.payer, p.payee, p, amount);
-    }
-
-    function _charge(bytes32 paymentId, Payment calldata p, uint256 amount) internal {
-        if (_state[paymentId].exists) revert PaymentAlreadyExists();
-        _validatePayment(p, amount);
-
-        _configHash[paymentId] = _hash(p);
-        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
-        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({
-            exists: true,
-            capturableAmount: 0,
-            refundableAmount: amount120
-        });
-
-        _safeTransferFrom(p.token, p.payer, address(this), amount);
-        _distribute(p, amount);
-
-        emit PaymentCharged(paymentId, p.payer, p.payee, p, amount);
-    }
-
-    function _refund(bytes32 paymentId, Payment calldata p, uint256 amount) internal {
-        if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
-        if (block.timestamp >= p.refundExpiry) revert RefundExpired();
-        if (amount == 0 || amount > s.refundableAmount) revert InvalidRefundAmount();
-
-        // Safe cast: amount <= refundableAmount (uint120) checked above.
-        uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId].refundableAmount = s.refundableAmount - refundAmount120;
-
-        _safeTransferFrom(p.token, p.payee, p.payer, amount);
-
-        emit PaymentRefunded(paymentId, p.payer, p.payee, amount);
+    function _chargeNonce(bytes32 paymentId, bytes32 configHash) internal pure returns (bytes32) {
+        return keccak256(abi.encode(_CHARGE_NONCE_PREFIX, paymentId, configHash));
     }
 
     function _validatePayment(Payment calldata p, uint256 amount) internal view {
