@@ -302,7 +302,7 @@ export PAYMENT_ID=$(cast keccak "order-12345")
 
 ### One-time merchant approval
 
-The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant approves RAIL0 once so refunds can pull from their wallet:
+The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant does need to approve RAIL0 once, because captured funds live in the merchant's own wallet (not in the contract), so refunds work by pulling from there via `transferFrom` — which requires a standing allowance:
 
 ```sh
 cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
