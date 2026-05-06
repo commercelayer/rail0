@@ -4,7 +4,7 @@ The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can impl
 
 Stablecoins changed the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
 
-RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like card-on-file: the buyer signs an EIP-712 authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster — buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. RAIL0 accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment EIP-712 authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster — buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. RAIL0 accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
 Payment rails should be open like the rest of the internet. That is the mission. The zero in RAIL0 is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, RAIL0 is the last payment rail the new era needs. The rest is just integration.
 
@@ -16,8 +16,6 @@ RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality**. Concre
 - **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Merchants pay gas in the same asset they're settling in — no second gas-token to manage.
 - **L1 sovereignty.** No sequencer dependency, no withdrawal delays, no inherited security from another chain.
 - **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times.
-
-There is no ERC-4337 dependency. RAIL0 uses off-chain EIP-712 authorizations + standard meta-transactions; any wallet that signs typed data works.
 
 Currently targeted:
 
@@ -36,7 +34,7 @@ RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce
 
 ### Lifecycle
 
-A payment moves through three sequential time windows defined by the configuration the buyer and merchant agree on up front. Until `preApprovalExpiry`, the buyer can open the payment with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold). Once authorized, the merchant has until `authorizationExpiry` to `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and release it back to the buyer; after that deadline the buyer can `reclaim` anything still in escrow. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `preApprovalExpiry ≤ authorizationExpiry ≤ refundExpiry`. Each operation is detailed below in lifecycle order.
+A payment moves through three sequential time windows defined by the configuration the buyer and merchant agree on up front. Until `preApprovalExpiry`, the payment can be opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Once authorized, the merchant has until `authorizationExpiry` to `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and release it back to the buyer; after that deadline anyone may submit `reclaim` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `preApprovalExpiry ≤ authorizationExpiry ≤ refundExpiry`. Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -139,8 +137,8 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 
 | Field                  | Type      | Meaning                                                          |
 |------------------------|-----------|------------------------------------------------------------------|
-| `payer`                | `address` | Buyer. Authorized to call `authorize`, `charge`, `reclaim`.      |
-| `payee`                | `address` | Merchant. Authorized to call `capture`, `void`, `refund`.        |
+| `payer`                | `address` | Buyer. Source of escrowed funds; signer of `AuthorizeIntent` / `ChargeIntent` off-chain. |
+| `payee`                | `address` | Merchant. Calls `capture`, `void`, `refund`. Recipient of captured funds. |
 | `token`                | `address` | ERC-20 stablecoin. Must be in the deployment's allowlist.        |
 | `maxAmount`            | `uint120` | Upper bound on the amount the buyer can authorize.               |
 | `preApprovalExpiry`    | `uint48`  | Cutoff for `authorize` / `charge`.                               |
@@ -289,10 +287,6 @@ In all cases, **the submitter pays gas, the buyer never broadcasts a transaction
 **What about reclaim?**
 
 `reclaim` is callable by anyone (not just the buyer). Funds always go to `p.payer` regardless of submitter, so there is no theft potential. A buyer who has been ghosted by the merchant doesn't need to hold the chain's gas asset to recover their funds — a relayer or watchdog service can submit the reclaim on their behalf.
-
-**Why not ERC-4337?**
-
-We considered a built-in ERC-4337 paymaster (the design that shipped in v0.1.0). The off-chain-auth pattern is strictly simpler: no bundler infrastructure, no smart-account wallet requirement for buyers, no `paymasterAndData` plumbing, ~250 fewer lines of contract code. Both flows achieve the same end (buyer signs, merchant pays gas) — the meta-tx version just gets there with less machinery. The card-rails analog is also more direct: buyer signs the auth, merchant runs the card.
 
 ## Examples
 
