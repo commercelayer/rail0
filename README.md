@@ -4,21 +4,22 @@ The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can impl
 
 Stablecoins changed the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
 
-RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. The same contract bundles permissionless gas sponsorship via ERC-4337, so merchants can absorb the cost of acceptance the way they always have under card networks — without any intermediary in between. It composes with smart-account wallets, accepts any ERC-20 stablecoin, and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+RAIL0 is the alternative: a single immutable Solidity contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like card-on-file: the buyer signs an EIP-712 authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster — buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. RAIL0 accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
 Payment rails should be open like the rest of the internet. That is the mission. The zero in RAIL0 is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, RAIL0 is the last payment rail the new era needs. The rest is just integration.
 
 ## Supported chains
 
-RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality and ERC-4337 v0.7 deployed**. Concretely:
+RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality**. Concretely:
 
 - **EVM-compatible.** Solidity 0.8.27 must compile and execute on the chain.
-- **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Buyers and merchants transact in a single asset end to end.
+- **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Merchants pay gas in the same asset they're settling in — no second gas-token to manage.
 - **L1 sovereignty.** No sequencer dependency, no withdrawal delays, no inherited security from another chain.
 - **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times.
-- **ERC-4337 v0.7 EntryPoint deployed.** The canonical EntryPoint at `0x0000000071727De22E5E9d8BAf0edAc6f37da032` (or the chain's local equivalent) is required at construction. Without it, gas sponsorship doesn't work — and gas sponsorship is part of RAIL0's standard API, not a separate add-on.
 
-Currently supported:
+There is no ERC-4337 dependency. RAIL0 uses off-chain EIP-712 authorizations + standard meta-transactions; any wallet that signs typed data works.
+
+Currently targeted:
 
 | Chain | Status | Native gas | RAIL0 deployment |
 |-------|--------|------------|------------------|
@@ -27,11 +28,11 @@ Currently supported:
 | Plasma | planned | USDT | _none yet_ |
 | Codex | planned | USDC | _none yet_ |
 
-Chains explicitly NOT supported: anything without a deployed ERC-4337 v0.7 EntryPoint, anything without stablecoin-native gas (Ethereum mainnet, Base, Arbitrum, Optimism, Polygon, etc.), L2s with sequencer-controlled finality.
+Chains explicitly NOT supported: anything without stablecoin-native gas (Ethereum mainnet, Base, Arbitrum, Optimism, Polygon, etc.), L2s with sequencer-controlled finality.
 
 ## Protocol
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. The same contract is also an ERC-4337 paymaster: merchants can pre-fund a gas budget and authorize sponsored UserOps for their payments via a single EIP-712 signature per order. Sponsorship is part of the standard API — there is no separate sponsor contract.
+RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable Solidity contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a meta-transaction pattern: the buyer signs an EIP-712 `AuthorizeIntent` or `ChargeIntent` off-chain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. The buyer never has to broadcast a transaction or hold the chain's gas asset.
 
 ### Lifecycle
 
@@ -40,22 +41,34 @@ A payment moves through three sequential time windows defined by the configurati
 #### Authorize
 
 ```solidity
-function authorize(bytes32 paymentId, Payment calldata p, uint256 amount) external;
+function authorize(
+    bytes32 paymentId,
+    Payment calldata p,
+    uint256 amount,
+    uint48 deadline,
+    bytes calldata buyerSig
+) external;
 ```
 
 Buyer escrows `amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-Only `p.payer` may call. The buyer supplies a fresh, never-used `paymentId` and the full `Payment` configuration. The contract validates the config (expiries in order, fee within bounds, addresses non-zero, token in the deployment's allowlist), checks that `0 < amount ≤ p.maxAmount`, and that `block.timestamp < p.preApprovalExpiry`. It then computes the EIP-712 hash of `p` and stores it as the immutable terms of the payment, sets `capturableAmount = amount`, and pulls the tokens from the buyer via `transferFrom`. This requires the buyer to have approved RAIL0 on the token beforehand, or to use `permitAndAuthorize` to bundle the approval. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, the buyer's `reclaim` opens after `authorizationExpiry`.
+The buyer signs an EIP-712 `AuthorizeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` off-chain. Anyone — typically the merchant — submits this transaction. The contract validates the config (expiries in order, fee within bounds, addresses non-zero, token in the deployment's allowlist), checks that `0 < amount ≤ p.maxAmount` and `block.timestamp < p.preApprovalExpiry`, recomputes the configHash from the supplied Payment, recovers the signer of the `AuthorizeIntent` digest, and requires it to equal `p.payer`. The signature also commits the buyer to the exact Payment terms — a merchant can't substitute different terms and still pull from the buyer's wallet. The contract stores the configHash, sets `capturableAmount = amount`, and pulls tokens via `transferFrom`. The buyer must have approved RAIL0 on the token beforehand, or `permitAndAuthorize` bundles the permit grant in the same call. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, `reclaim` opens after `authorizationExpiry`.
 
 #### Charge
 
 ```solidity
-function charge(bytes32 paymentId, Payment calldata p, uint256 amount) external;
+function charge(
+    bytes32 paymentId,
+    Payment calldata p,
+    uint256 amount,
+    uint48 deadline,
+    bytes calldata buyerSig
+) external;
 ```
 
 Buyer authorizes and pays through in a single call — no escrow hold.
 
-Only `p.payer` may call. Preconditions are identical to `authorize` (fresh `paymentId`, valid amount, before `preApprovalExpiry`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
+Same submission pattern as `authorize` (buyer signs off-chain, anyone submits) but the buyer signs `ChargeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` instead — a distinct typehash so an `AuthorizeIntent` signature cannot be used to call `charge` or vice versa. Preconditions are otherwise identical (fresh `paymentId`, valid amount, before `preApprovalExpiry`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
 
 #### Capture
 
@@ -85,7 +98,7 @@ function reclaim(bytes32 paymentId, Payment calldata p) external;
 
 Buyer's safety net — pull escrowed funds back if the merchant never captured.
 
-Only `p.payer` may call, and only after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) to the buyer and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — RAIL0 has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
+**Anyone may call** — funds always go to `p.payer` regardless of who submits, so there is no theft potential and the buyer doesn't need to hold the chain's gas asset to recover their funds. A relayer or watchdog service can submit the reclaim on the buyer's behalf. Only callable after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — RAIL0 has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
 
 #### Refund
 
@@ -100,12 +113,25 @@ Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ 
 #### Permit-bundled variants
 
 ```solidity
-function permitAndAuthorize(bytes32 paymentId, Payment calldata p, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external;
-function permitAndCharge   (bytes32 paymentId, Payment calldata p, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external;
-function permitAndRefund   (bytes32 paymentId, Payment calldata p, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external;
+function permitAndAuthorize(
+    bytes32 paymentId, Payment calldata p, uint256 amount, uint48 deadline, bytes calldata buyerSig,
+    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
+) external;
+
+function permitAndCharge(
+    bytes32 paymentId, Payment calldata p, uint256 amount, uint48 deadline, bytes calldata buyerSig,
+    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
+) external;
+
+function permitAndRefund(
+    bytes32 paymentId, Payment calldata p, uint256 amount,
+    uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS
+) external;
 ```
 
-Each of the three transfer-pulling operations has a permit-bundled variant that calls `IERC20Permit.permit(...)` first, eliminating the separate approval transaction. The `permit` call is wrapped in `try/catch` and its failure is swallowed — this means the wrapper degrades gracefully on tokens that don't implement EIP-2612, on signatures that have been front-run (nonce advanced), and on callers who already have standing approval. If neither path provides allowance, the inner transfer reverts with the token's allowance error. `permitAndAuthorize` and `permitAndCharge` use the buyer's signature (`p.payer` is the permit owner); `permitAndRefund` uses the merchant's (`p.payee` is the owner).
+Each transfer-pulling operation has a permit-bundled variant that calls `IERC20Permit.permit(...)` first, eliminating the separate approval transaction. The `permit` call is wrapped in `try/catch` and its failure is swallowed — the wrapper degrades gracefully on tokens that don't implement EIP-2612, on signatures that have been front-run (nonce advanced), and on callers who already have standing approval. If neither path provides allowance, the inner transfer reverts with the token's allowance error.
+
+For the buyer-side wrappers (`permitAndAuthorize` / `permitAndCharge`), the buyer signs **two** things off-chain: the EIP-2612 token permit (over the token's domain) and the RAIL0 intent (`AuthorizeIntent` / `ChargeIntent` over RAIL0's domain). Anyone submits both as one transaction. For the merchant-side wrapper (`permitAndRefund`), the merchant signs the token permit and submits the call themselves (`msg.sender == p.payee` required, no buyer involvement).
 
 ### The `Payment` struct
 
@@ -146,21 +172,30 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="2", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
-The domain separator is cached at construction and rebuilt automatically if `block.chainid` changes (chain-fork safety). Two helpers expose the values to off-chain signers:
+Buyer-initiated intents are EIP-712 typed data over the same domain:
+
+- `AuthorizeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` — buyer signs to authorize a subsequent `authorize` call.
+- `ChargeIntent(bytes32 paymentId, bytes32 configHash, uint256 amount, uint48 deadline)` — same shape, distinct typehash, used for `charge`.
+
+Including `configHash` in the signed payload binds the buyer's authorization to the exact Payment terms — substituting different terms invalidates the signature.
+
+The domain separator is cached at construction and rebuilt automatically if `block.chainid` changes (chain-fork safety). Helpers exposed to off-chain signers:
 
 - `DOMAIN_SEPARATOR()` — current EIP-712 domain separator.
-- `hashPayment(p)` — full digest matching what the contract stores.
+- `hashPayment(p)` — Payment digest (also stored on-chain as configHash).
+- `hashAuthorizeIntent(paymentId, configHash, amount, deadline)` — digest the buyer signs for `authorize`.
+- `hashChargeIntent(paymentId, configHash, amount, deadline)` — digest the buyer signs for `charge`.
 
 ### Allowance requirements
 
-RAIL0 does not custody anything outside the active escrow window. Two parties may need to grant allowances:
+RAIL0 does not custody anything outside the active escrow window. Two parties may need to grant allowances on the underlying ERC-20:
 
-- **Buyer.** Must approve RAIL0 (or sign a permit) before `authorize`/`charge` so the contract can pull escrow.
+- **Buyer.** Must approve RAIL0 (or sign a permit) so the contract can pull escrow at `authorize`/`charge` time. Note: this is an *ERC-20 allowance on the token contract*, not on RAIL0. The buyer's `AuthorizeIntent` / `ChargeIntent` signature authorizes RAIL0 to *call `transferFrom`*; the token's allowance gates whether that call succeeds.
 - **Merchant.** Must approve RAIL0 (or sign a permit) before `refund` so the contract can pull captured funds back from the merchant's wallet. This is non-obvious — the merchant never needs an allowance during the happy path (`capture` distributes from contract-held escrow), only at refund time.
 
-The `permitAnd*` wrappers cover both cases via signature, removing the standing-approval requirement on tokens that implement EIP-2612.
+The `permitAnd*` wrappers bundle the relevant token permit, removing the standing-approval requirement on tokens that implement EIP-2612.
 
 ### Events
 
@@ -183,7 +218,9 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 | Error                       | Cause                                                              |
 |-----------------------------|--------------------------------------------------------------------|
-| `NotPayer` / `NotPayee`     | Caller is not the authorized party for the operation.              |
+| `NotPayee`                  | Caller is not the merchant for a merchant-only operation.          |
+| `InvalidAuthorization`      | Buyer signature missing, malformed, or doesn't match `p.payer` over the supplied terms. |
+| `AuthorizationDeadlineExpired` | `block.timestamp > deadline` on a buyer intent signature.       |
 | `PaymentAlreadyExists`      | `paymentId` was already used.                                      |
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
@@ -216,7 +253,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `reclaim` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 72-test Foundry suite covers the lifecycle (`RAIL0.t.sol` — 48 tests: allowlist, every revert path, EIP-712, permit wrappers, reentrancy, USDT-style non-returning tokens) and gas sponsorship (`RAIL0Sponsorship.t.sol` — 24 tests: deposit/withdraw, paymaster validation under all failure modes, scope enforcement across all nine RAIL0 selectors, configHash binding, postOp refund accounting). No external audit has been performed.
+- **Test coverage.** A 56-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the lifecycle, allowlist construction, every revert path, EIP-712 hashing, intent signature verification (wrong signer, tampered amount, tampered Payment, expired deadline, wrong intent type), permit wrappers (success + fallback), reentrancy attempts via a malicious mock token, USDT-style non-returning tokens, and the public `reclaim` path. No external audit has been performed.
 
 ### Limits
 
@@ -234,42 +271,28 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 ### Gas sponsorship
 
-In RAIL0, the merchant covers the buyer's gas — mirroring how card networks shift infrastructure cost off the buyer. This is the standard pattern across every supported chain, regardless of what fee-payer mechanism the chain provides natively. Same merchant integration, same signing flow, same operational model on Tempo, Arc, Plasma, Codex.
+There is no separate sponsorship layer in RAIL0. Sponsorship is just "the merchant submits the transaction" — the meta-transaction pattern handles it for free.
 
-**The mechanism is part of RAIL0 itself**, not a separate contract. RAIL0 is also the ERC-4337 v0.7 paymaster: merchants deposit native gas asset into their `gasDeposits` slot, sign a per-paymentId `Sponsorship(bytes32 paymentId, bytes32 configHash, uint48 deadline)` once when the order is created, and any UserOp targeting that paymentId throughout the payment lifecycle (authorize → capture → refund) is sponsored from the merchant's budget.
+The mechanics: the buyer signs an `AuthorizeIntent` or `ChargeIntent` off-chain. The merchant (or any third party) takes that signature plus the Payment terms and submits a regular Ethereum transaction calling `authorize` / `charge`. The submitter is the `tx.origin`, so the submitter pays gas natively in the chain's gas asset. On stablecoin-gas chains, that's the same stablecoin the merchant is settling in — no second asset to manage.
 
-This commits the buyer to a smart-account wallet (any ERC-4337-compatible account: SimpleAccount, Safe with the 4337 plugin, Kernel, Biconomy V2, Circle Modular Wallets) — the dominant direction for end-user wallets in 2026.
+**Who can sponsor?**
 
-**Properties**
+Anyone willing to submit the transaction. The protocol doesn't track sponsors, doesn't require deposits, doesn't validate sponsor identity. Common patterns:
 
-- **No privileged roles.** Same as the rest of RAIL0: no owner, no admin, no upgradeability. The EntryPoint reference is immutable, set in the constructor.
-- **Permissionless deposits.** Any address can deposit native gas to its own merchant slot via `depositGas()` or to another merchant's via `depositGasFor(address)`. Each merchant controls only their own balance.
-- **Scoped to RAIL0 calls.** The paymaster verifies on-chain that the sponsored UserOp's outer call is `execute(address(this), 0, ...)` and that the inner selector is one of RAIL0's nine entrypoints. A leaked merchant signing key can only drain its own deposit on RAIL0 transactions — never on unrelated calls.
-- **Term-bound EIP-712 signatures.** Sign over `Sponsorship(paymentId, configHash, deadline)`: the signature commits to a specific `paymentId` AND to the exact Payment terms (via the configHash). A buyer can't substitute different terms and still pull from the merchant's gas budget.
-- **One signature per order.** The merchant signs once when creating the order — same signature works for every UserOp authorizing that paymentId until `deadline`. No online per-UserOp signing service.
-- **Pre-deduct + refund accounting.** `validatePaymasterUserOp` deducts `maxCost` from the merchant's balance up front; `postOp` refunds `maxCost − actualGasCost`. Serializes concurrent sponsored ops without needing a separate nonce.
+- **Merchant submits.** The most common case. Merchant runs a checkout backend that takes the buyer's signed intent + Payment terms and submits the tx. Merchant absorbs gas as a cost of acceptance, exactly like card interchange.
+- **Platform / payment facilitator submits.** A platform aggregating many merchants can run a single relayer that submits txs for all of them. Bills the merchants off-chain.
+- **Third-party relayer submits.** Anyone with stablecoin balance and a will to pay gas. Could be a grant-funded relayer subsidizing categories of transactions.
+- **Buyer submits themselves.** Always allowed — the buyer can sign + submit in one go if they prefer. Wallet shows two prompts (sign typed data, then submit transaction). Useful when the buyer doesn't trust any specific merchant/relayer to submit.
 
-**Per-payment flow**
+In all cases, **the submitter pays gas, the buyer never broadcasts a transaction**, and the buyer's wallet only ever signs typed data.
 
-1. Merchant pre-deposits gas via `depositGas{value: ...}()`. The contract forwards to the EntryPoint and credits `gasDeposits[merchant]`.
-2. When creating an order, the merchant computes `configHash = hashPayment(p)`, picks a `deadline` (typically `p.refundExpiry` to cover the full lifecycle), and signs the EIP-712 `Sponsorship(paymentId, configHash, deadline)` digest.
-3. The signature is embedded in the buyer's checkout flow alongside the Payment terms.
-4. The buyer's smart account prepares a UserOp calling `execute(rail0, 0, encodedRailCall)`. The signature goes in `paymasterAndData`: `[paymaster (20)][verifGas (16)][postOpGas (16)][deadline (6)][signature (65)]` = 123 bytes.
-5. The EntryPoint calls `validatePaymasterUserOp`. RAIL0 decodes the inner call, extracts `p.payee` from the inner Payment struct, computes its configHash, verifies the signature came from `p.payee`, and pre-deducts `maxCost` from `gasDeposits[p.payee]`.
-6. Execution runs (RAIL0's payment logic). EntryPoint calls `postOp`; RAIL0 refunds the unused gas to the merchant's slot.
-7. Merchant can withdraw any unused balance via `withdrawGas(to, amount)`.
+**What about reclaim?**
 
-**Account compatibility**
+`reclaim` is callable by anyone (not just the buyer). Funds always go to `p.payer` regardless of submitter, so there is no theft potential. A buyer who has been ghosted by the merchant doesn't need to hold the chain's gas asset to recover their funds — a relayer or watchdog service can submit the reclaim on their behalf.
 
-The paymaster expects the smart account to expose the standard `execute(address target, uint256 value, bytes data)` selector (`0xb61d27f6`) — used by SimpleAccount, Kernel, Safe with the 4337 plugin, Biconomy V2, and most modular accounts. Accounts that use non-standard outer ABIs (for example, ERC-7579 batched `execute(bytes32 mode, bytes data)` only) are not sponsorable through this paymaster.
+**Why not ERC-4337?**
 
-**Sponsorship events**
-
-```solidity
-event GasDeposit (address indexed merchant, address indexed from, uint256 amount);
-event GasWithdraw(address indexed merchant, address indexed to,   uint256 amount);
-event Sponsored  (address indexed merchant, bytes32 indexed paymentId, uint256 actualGasCost);
-```
+We considered a built-in ERC-4337 paymaster (the design that shipped in v0.1.0). The off-chain-auth pattern is strictly simpler: no bundler infrastructure, no smart-account wallet requirement for buyers, no `paymasterAndData` plumbing, ~250 fewer lines of contract code. Both flows achieve the same end (buyer signs, merchant pays gas) — the meta-tx version just gets there with less machinery. The card-rails analog is also more direct: buyer signs the auth, merchant runs the card.
 
 ## Examples
 
@@ -281,13 +304,13 @@ Set the addresses and keys you'll reuse:
 
 ```sh
 export RPC=https://rpc.example.network
-export RAIL0=0x...                  # the RAIL0 deployment (also the paymaster)
+export RAIL0=0x...                  # the RAIL0 deployment
 export TOKEN=0x...                  # an accepted stablecoin
 export PAYER=0x...                  # buyer wallet
 export PAYEE=0x...                  # merchant wallet
 export FEE_RCV=0x...                # fee receiver (or 0x0 if feeBps == 0)
-export PAYER_KEY=0x...              # buyer signing key
-export PAYEE_KEY=0x...              # merchant signing key (signs Sponsorship digests for refund + gas)
+export PAYER_KEY=0x...              # buyer signing key (signs AuthorizeIntent / ChargeIntent off-chain)
+export PAYEE_KEY=0x...              # merchant signing key (submits txs, also signs token permits for refund)
 ```
 
 The `Payment` struct is a 9-field tuple. Define it once and reuse:
@@ -315,17 +338,29 @@ cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Authorize → Capture → Refund
+### Authorize (buyer signs, merchant submits)
 
-**Buyer authorizes** (escrows funds):
+The buyer signs an `AuthorizeIntent` off-chain. The merchant submits the transaction and pays gas.
 
 ```sh
-cast send $RAIL0 "authorize(bytes32,$PAYMENT_TYPE,uint256)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 \
-  --rpc-url $RPC --private-key $PAYER_KEY
+# 1. Compute the digest the buyer needs to sign
+CONFIG_HASH=$(cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC)
+DEADLINE=$(($(date +%s) + 600))   # 10 minutes
+DIGEST=$(cast call $RAIL0 "hashAuthorizeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH 100000000 $DEADLINE --rpc-url $RPC)
+
+# 2. Buyer signs the raw digest (no EIP-191 prefix — RAIL0 uses ecrecover directly)
+BUYER_SIG=$(cast wallet sign --no-hash --private-key $PAYER_KEY $DIGEST)
+
+# 3. Merchant submits the transaction and pays gas
+cast send $RAIL0 "authorize(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $BUYER_SIG \
+  --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-**Merchant captures** (pulls escrow into payee + fee receiver):
+In production, the buyer's wallet (Metamask, Rabby, hardware) signs typed data via the wallet's `eth_signTypedData_v4`, which renders the fields in the wallet UI. The `cast wallet sign --no-hash` invocation here is the equivalent for terminal flows.
+
+### Capture (merchant)
 
 ```sh
 # Full capture
@@ -339,7 +374,9 @@ cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-**Merchant refunds** (pulls from own wallet back to buyer):
+### Refund (merchant)
+
+Pulls from merchant's own wallet back to buyer. Requires the merchant's standing ERC-20 approval (or use `permitAndRefund`):
 
 ```sh
 cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
@@ -347,14 +384,18 @@ cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Charge (one-shot pay-through)
+### Charge (buyer signs, merchant submits — one-shot pay-through)
 
-Skip escrow; pay merchant immediately. Refunds remain available until `refundExpiry`.
+Skip escrow; pay merchant immediately. Refunds remain available until `refundExpiry`. Buyer signs `ChargeIntent` (distinct from `AuthorizeIntent`):
 
 ```sh
-cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint256)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 \
-  --rpc-url $RPC --private-key $PAYER_KEY
+DIGEST=$(cast call $RAIL0 "hashChargeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH 100000000 $DEADLINE --rpc-url $RPC)
+BUYER_SIG=$(cast wallet sign --no-hash --private-key $PAYER_KEY $DIGEST)
+
+cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $BUYER_SIG \
+  --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
 ### Void (merchant cancels authorization)
@@ -367,29 +408,32 @@ cast send $RAIL0 "void(bytes32,$PAYMENT_TYPE)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Reclaim (buyer's safety net)
+### Reclaim (anyone — public after authorizationExpiry)
 
-After `authorizationExpiry`, if no capture happened, the buyer pulls their escrow back:
+After `authorizationExpiry`, if no capture happened, anyone can submit `reclaim` and the funds go to `p.payer`:
 
 ```sh
+# A relayer / watchdog / the buyer themselves — any signing key works
 cast send $RAIL0 "reclaim(bytes32,$PAYMENT_TYPE)" \
   $PAYMENT_ID "$PAYMENT" \
-  --rpc-url $RPC --private-key $PAYER_KEY
+  --rpc-url $RPC --private-key $RELAYER_KEY
 ```
 
 ### Permit-bundled variants
 
-These need an EIP-2612 `permit` signature on the token. Computing it requires the token's domain separator and the signer's nonce — typically done by a wallet/SDK rather than on the command line. The shape:
+The buyer-side wrappers take **two** signatures: the buyer's `AuthorizeIntent` / `ChargeIntent` signature plus the EIP-2612 token permit (which the token's wallet/SDK produces from its own domain separator and nonce):
 
 ```sh
-# Sign the permit off-chain (wallet/SDK), then:
-cast send $RAIL0 "permitAndAuthorize(bytes32,$PAYMENT_TYPE,uint256,uint256,uint8,bytes32,bytes32)" \
-  $PAYMENT_ID "$PAYMENT" 100000000 \
-  $DEADLINE $V $R $S \
-  --rpc-url $RPC --private-key $PAYER_KEY
+# AUTH_SIG is the buyer's intent signature (computed as in "Authorize" above)
+# PERMIT_V/R/S come from signing the token's EIP-2612 permit struct off-chain
+cast send $RAIL0 \
+  "permitAndAuthorize(bytes32,$PAYMENT_TYPE,uint256,uint48,bytes,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" 100000000 $DEADLINE $AUTH_SIG \
+  $PERMIT_DEADLINE $PERMIT_V $PERMIT_R $PERMIT_S \
+  --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-Same shape for `permitAndCharge` (signed by buyer) and `permitAndRefund` (signed by merchant — owner is `$PAYEE`).
+Same shape for `permitAndCharge`. `permitAndRefund` is merchant-only (no buyer involvement, just the merchant's token permit + their submission).
 
 ### Reading state
 
@@ -407,11 +451,19 @@ cast call $RAIL0 "getConfigHash(bytes32)(bytes32)" \
   $PAYMENT_ID --rpc-url $RPC
 ```
 
-Compute the EIP-712 digest the contract uses (matches `getConfigHash` after `authorize`):
+Compute EIP-712 digests the contract uses:
 
 ```sh
-cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" \
-  "$PAYMENT" --rpc-url $RPC
+# Payment digest (matches getConfigHash after authorize)
+cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC
+
+# Buyer's authorize-intent digest
+cast call $RAIL0 "hashAuthorizeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH $AMOUNT $DEADLINE --rpc-url $RPC
+
+# Buyer's charge-intent digest
+cast call $RAIL0 "hashChargeIntent(bytes32,bytes32,uint256,uint48)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH $AMOUNT $DEADLINE --rpc-url $RPC
 ```
 
 Domain separator and allowlist check:
@@ -420,147 +472,6 @@ Domain separator and allowlist check:
 cast call $RAIL0 "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC
 cast call $RAIL0 "isAcceptedToken(address)(bool)" $TOKEN --rpc-url $RPC
 ```
-
-### Gas sponsorship
-
-Gas pool calls go to RAIL0 itself — same address as payments. On RAIL0's target chains the native gas asset is a stablecoin (USDC on Arc / Tempo, USDT on Plasma, …). Native units use 18 decimals at the EVM level regardless of the ERC-20's decimals, so `1e18` wei = 1 stablecoin. Avoid `cast`'s `ether` shorthand here — it's mechanically correct but reads as ETH. Use raw wei.
-
-```sh
-# 0.1 stablecoin = 1e17 wei (native, 18-decimal). NOT the ERC-20 6-decimal amount.
-export GAS_DEPOSIT=100000000000000000
-```
-
-**Merchant deposits gas** (forwards to the EntryPoint, credits internal balance):
-
-```sh
-# Deposit for self
-cast send $RAIL0 "depositGas()" --value $GAS_DEPOSIT \
-  --rpc-url $RPC --private-key $PAYEE_KEY
-
-# Deposit on behalf of another merchant (anyone can fund any merchant identity)
-cast send $RAIL0 "depositGasFor(address)" $PAYEE --value $GAS_DEPOSIT \
-  --rpc-url $RPC --private-key $PAYER_KEY
-```
-
-**Check merchant gas balance** (returns native-units, 18 decimals):
-
-```sh
-cast call $RAIL0 "gasDeposits(address)(uint256)" $PAYEE --rpc-url $RPC
-```
-
-**Withdraw unused balance** (only the merchant themselves can withdraw their own):
-
-```sh
-# Withdraw 0.05 stablecoin = 5e16 wei
-cast send $RAIL0 "withdrawGas(address,uint256)" $PAYEE 50000000000000000 \
-  --rpc-url $RPC --private-key $PAYEE_KEY
-```
-
-**Compute the per-paymentId sponsorship digest** for the merchant to sign once per order:
-
-```sh
-# CONFIG_HASH is hashPayment(p), DEADLINE is typically Payment.refundExpiry.
-cast call $RAIL0 "hashSponsorship(bytes32,bytes32,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH $DEADLINE \
-  --rpc-url $RPC
-```
-
-The merchant signs this digest once when creating the order. Any UserOp targeting `$PAYMENT_ID` until `$DEADLINE` carries the signature in `paymasterAndData` as `[paymaster (20)][verifGas (16)][postOpGas (16)][deadline (6)][signature (65)]` = 123 bytes total. End-to-end assembly is shown below.
-
-### End-to-end: merchant-sponsored authorize
-
-Walk-through of a single buyer `authorize` where the merchant covers the gas. Assumes the buyer uses a deployed SimpleAccount-style ERC-4337 smart-account wallet (ECDSA signing scheme over `userOpHash`), exposing the standard `execute(address,uint256,bytes)`, and has approved RAIL0 to pull the token (or the flow uses `permitAndAuthorize`).
-
-Note that the merchant signs the sponsorship **once when the order is created** — same signature works for every UserOp targeting that paymentId until `deadline` (typically `Payment.refundExpiry` to cover the full lifecycle).
-
-**Additional setup**
-
-```sh
-export ENTRY_POINT=0x0000000071727De22E5E9d8BAf0edAc6f37da032   # canonical v0.7
-export BUYER_SCA=0x...                                          # buyer's deployed smart account
-export BUYER_KEY=0x...                                          # buyer's ECDSA key (the smart account's owner)
-export BUNDLER_RPC=https://...                                  # bundler RPC endpoint
-```
-
-**One-time merchant setup**
-
-```sh
-# Fund merchant gas budget with stablecoin (1e18 wei = 1 stablecoin).
-cast send $RAIL0 "depositGas()" --value 1000000000000000000 \
-  --rpc-url $RPC --private-key $PAYEE_KEY
-```
-
-**Sign sponsorship at order-creation time** (off-chain, once per order):
-
-```sh
-# Compute the configHash and sponsorship digest, then sign with the merchant's key.
-CONFIG_HASH=$(cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC)
-DEADLINE=1738972800   # typically Payment.refundExpiry
-DIGEST=$(cast call $RAIL0 "hashSponsorship(bytes32,bytes32,uint48)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH $DEADLINE --rpc-url $RPC)
-SPONSOR_SIG=$(cast wallet sign --no-hash --private-key $PAYEE_KEY $DIGEST)
-```
-
-**Per-UserOp flow** (pure `cast` + `cast rpc`):
-
-```sh
-# 1. Inner call: RAIL0.authorize(paymentId, payment, amount)
-RAIL_CALL=$(cast calldata "authorize(bytes32,$PAYMENT_TYPE,uint256)" \
-  $PAYMENT_ID "$PAYMENT" 100000)
-
-# 2. Outer call: smart account's execute(rail0, 0, railCallData)
-ACCOUNT_CALL=$(cast calldata "execute(address,uint256,bytes)" \
-  $RAIL0 0 $RAIL_CALL)
-
-# 3. Buyer SCA nonce from the EntryPoint
-NONCE=$(cast call $ENTRY_POINT "getNonce(address,uint192)(uint256)" \
-  $BUYER_SCA 0 --rpc-url $RPC)
-
-# 4. Packed gas limits and fees (use generous fixed values for the example; production
-#    should estimate via `cast rpc --rpc-url $BUNDLER_RPC eth_estimateUserOperationGas ...`)
-ACCOUNT_GAS_LIMITS=0x00000000000000000000000000030d4000000000000000000000000000186a0  # verif=200k, call=100k
-GAS_FEES=0x000000000000000000000000773594000000000000000000000000000ee6b2800           # prio=2gwei, max=4gwei
-PRE_VERIF_GAS=21000
-
-# 5. Build paymasterAndData = [paymaster (20)][verifGas (16)][postOpGas (16)][deadline (6)][sig (65)] = 123 bytes
-PMD=0x${RAIL0:2}$(printf '%032x' 100000)$(printf '%032x' 50000)$(printf '%012x' $DEADLINE)${SPONSOR_SIG:2}
-
-# 6. Compute the EntryPoint's userOpHash for the buyer to sign
-USER_OP_TUPLE="($BUYER_SCA,$NONCE,0x,$ACCOUNT_CALL,$ACCOUNT_GAS_LIMITS,$PRE_VERIF_GAS,$GAS_FEES,$PMD,0x)"
-USER_OP_HASH=$(cast call $ENTRY_POINT \
-  "getUserOpHash((address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes))(bytes32)" \
-  "$USER_OP_TUPLE" --rpc-url $RPC)
-
-# 7. Buyer signs the userOpHash (SimpleAccount applies EIP-191 prefix internally)
-BUYER_SIG=$(cast wallet sign --private-key $BUYER_KEY $USER_OP_HASH)
-
-# 8. Submit via bundler RPC
-cast rpc --rpc-url $BUNDLER_RPC eth_sendUserOperation "[
-  {
-    \"sender\": \"$BUYER_SCA\",
-    \"nonce\": \"$(cast to-hex $NONCE)\",
-    \"initCode\": \"0x\",
-    \"callData\": \"$ACCOUNT_CALL\",
-    \"accountGasLimits\": \"$ACCOUNT_GAS_LIMITS\",
-    \"preVerificationGas\": \"$(cast to-hex $PRE_VERIF_GAS)\",
-    \"gasFees\": \"$GAS_FEES\",
-    \"paymasterAndData\": \"$PMD\",
-    \"signature\": \"$BUYER_SIG\"
-  },
-  \"$ENTRY_POINT\"
-]"
-```
-
-**What lands on chain**
-
-- `RAIL0.validatePaymasterUserOp` decodes `paymasterAndData`, confirms the outer call is `execute(rail0, ..., authorize(...))`, decodes the inner Payment to extract `p.payee` and recompute the configHash, verifies the merchant's signature over `Sponsorship(paymentId, configHash, deadline)`, and pre-deducts `maxCost` from `gasDeposits[p.payee]`.
-- The EntryPoint executes the smart account, which calls `RAIL0.authorize` — pulling 0.1 USDC from `BUYER_SCA` into RAIL0's escrow.
-- `RAIL0.postOp` refunds `(maxCost − actualGasCost)` to `gasDeposits[p.payee]`.
-- Three log entries land in the same transaction: `PaymentAuthorized`, `Sponsored`, and the EntryPoint's `UserOperationEvent`.
-
-The buyer's wallet shows: 0.1 USDC moved out, 0 native gas spent. The merchant's `gasDeposits[$PAYEE]` shrinks by the actual gas cost.
-
-> The script above is verbose because ERC-4337 has many moving parts (packed gas limits, paymaster ABI, separate EntryPoint hash, account-specific signature schemes). It runs end-to-end with `cast` alone — no SDK required — but in production you'd typically use a 4337 SDK like permissionless.js, ZeroDev, or viem's account-abstraction module to handle gas estimation, smart-account quirks, and bundler retry logic.
 
 ## Development
 
@@ -590,11 +501,9 @@ The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes 
 contracts/
 ├── foundry.toml
 ├── src/
-│   ├── RAIL0.sol                  # the protocol — payment lifecycle + ERC-4337 paymaster
+│   ├── RAIL0.sol                  # the protocol contract
 │   └── interfaces/
-│       ├── IERC20.sol             # IERC20 + IERC20Permit
-│       └── IERC4337.sol           # IEntryPoint, IPaymaster, PackedUserOperation
+│       └── IERC20.sol             # IERC20 + IERC20Permit
 └── test/
-    ├── RAIL0.t.sol                # 48 lifecycle tests
-    └── RAIL0Sponsorship.t.sol     # 24 sponsorship tests
+    └── RAIL0.t.sol                # full test suite (lifecycle + meta-tx auth + reentrancy)
 ```
