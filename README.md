@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo/rail0_payoff_white.svg">
-  <img src="logo/rail0_payoff_black.svg" alt="RAIL0 — Peer-to-peer stablecoin payments for commerce" width="400">
+  <img src="logo/rail0_payoff_black.svg" alt="rail0 — Permissionless stablecoin payments for commerce" width="400">
 </picture>
 
 ---
@@ -9,7 +9,9 @@ The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can impl
 
 Stablecoins are changing the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
 
-_rail0_ is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster. Buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. _rail0_ accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+_rail0_ is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, and no privileged operator. The protocol supports optional facilitator fees: each payment can include a `feeBps` and `feeReceiver` so an API provider, checkout SDK, or payment platform can route a portion of each capture to themselves automatically. Fees, when present, are negotiated between merchant and facilitator and committed in the payment terms.
+
+Anyone can deploy the contract. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster. Buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. _rail0_ accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
 Payment rails should be open like the rest of the Internet. That is the mission. The zero in _rail0_ is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, _rail0_ is the last payment rail the new era needs.
 
@@ -24,12 +26,11 @@ _rail0_ is built for **stablecoin-native chains with sub-second finality**, acce
 
 Currently targeted:
 
-| Chain | Status | Native gas | _rail0_ deployment |
+| Chain | Status | Stablecoin(s) | _rail0_ deployment |
 |-------|--------|------------|------------------|
-| Tempo | planned | USDC (TIP-20) | _none yet_ |
-| Arc | planned | USDC | _none yet_ |
+| Tempo | planned | (TIP-20) | _none yet_ |
+| Arc | planned | USDC, EURC | _none yet_ |
 | Plasma | planned | USDT | _none yet_ |
-| Codex | planned | USDC | _none yet_ |
 
 ## Protocol
 
@@ -37,7 +38,7 @@ _rail0_ implements the authorize → capture → refund lifecycle familiar from 
 
 ### Lifecycle
 
-A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by the buyer's EIP-3009 signature `validBefore` rather than a Payment-level expiry. Each operation is detailed below in lifecycle order.
+A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by the buyer's EIP-3009 signature `validBefore`. Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -105,7 +106,7 @@ function release(bytes32 paymentId, Payment calldata p) external;
 
 Buyer's safety net — return escrowed funds to the buyer if the merchant never captured.
 
-**Anyone may call** — funds always go to `p.payer` regardless of who submits, so there is no theft potential and the buyer doesn't need to hold the chain's gas asset to recover their funds. A relayer or watchdog service can submit the release on the buyer's behalf. Only callable after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — RAIL0 has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
+**Anyone may call** — funds always go to `p.payer` regardless of who submits, so there is no theft potential and the buyer doesn't need to hold the chain's gas asset to recover their funds. A relayer or watchdog service can submit the release on the buyer's behalf. Only callable after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — _rail0_ has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
 
 #### Refund
 
@@ -115,7 +116,7 @@ function refund(bytes32 paymentId, Payment calldata p, uint256 amount) external;
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
 
-Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ refundableAmount`. State is updated: `refundableAmount -= amount`. Captured funds live in the merchant's wallet (not the contract), so `refund` calls `transferFrom(payee, payer, amount)` — **the merchant must keep an ERC-20 allowance to RAIL0 of at least `amount`**. The merchant is the on-chain submitter here, so they manage their own approval (typically `token.approve(rail0, max)` once at onboarding); no off-chain authorization signature is needed because they're broadcasting the tx anyway.
+Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ refundableAmount`. State is updated: `refundableAmount -= amount`. Captured funds live in the merchant's wallet (not the contract), so `refund` calls `transferFrom(payee, payer, amount)` — **the merchant must keep an ERC-20 allowance to _rail0_ of at least `amount`**. The merchant is the on-chain submitter here, so they manage their own approval (typically `token.approve(rail0, max)` once at onboarding); no off-chain authorization signature is needed because they're broadcasting the tx anyway.
 
 ### The `Payment` struct
 
@@ -143,28 +144,29 @@ Per `paymentId`, the contract keeps two storage entries:
 
 ### Token allowlist
 
-Each RAIL0 deployment is constructed with a fixed list of accepted ERC-20 token addresses. Calls to `authorize`/`charge` revert with `TokenNotAccepted` if `p.token` is not in the allowlist. The allowlist is set in the constructor and **cannot be modified afterward** — adding a new stablecoin requires a new deployment.
+Each _rail0_ deployment is constructed with a fixed list of accepted ERC-20 token addresses. Calls to `authorize`/`charge` revert with `TokenNotAccepted` if `p.token` is not in the allowlist. The allowlist is set in the constructor and **cannot be modified afterward** — adding a new stablecoin requires a new deployment.
 
 A `TokenAccepted(address indexed token)` event is emitted from the constructor for each entry, so an indexer can reconstruct the allowlist from the deployment transaction's logs. `isAcceptedToken(address)` is a public view for the same query.
 
 Practical implications:
 
 - One deployment per `(chain, set of accepted tokens)`. A single deployment can accept multiple stablecoins (e.g., USDC + EURC) provided you list them at construction.
-- When a chain adds a stablecoin you want to accept, deploy a new RAIL0 with the expanded list. Existing deployments continue to work for their original token set; new payments use the new deployment.
-- Integrators should pin the RAIL0 address per chain and not assume cross-deployment compatibility.
+- When a chain adds a stablecoin you want to accept, deploy a new _rail0_ with the expanded list. Existing deployments continue to work for their original token set; new payments use the new deployment.
+- Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
+- The contract is versioned (`VERSION` constant, also in the EIP-712 domain); bumping it invalidates prior signatures, so version changes also require a new deployment.
 
 ### Config commitment (EIP-712)
 
 The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="3", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
-Buyer-initiated operations don't introduce a separate RAIL0-domain signing typehash. Instead, RAIL0 derives a deterministic EIP-3009 nonce from the operation context:
+Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
 ```
 authorizeNonce = keccak256(keccak256("RAIL0.AUTHORIZE"), paymentId, configHash)
 chargeNonce    = keccak256(keccak256("RAIL0.CHARGE"),    paymentId, configHash)
 ```
 
-The buyer signs the token's standard `TransferWithAuthorization` digest with this nonce. The merchant submits, RAIL0 recomputes the nonce from the supplied Payment, and calls `token.transferWithAuthorization(...)`. If the merchant tampered with any Payment field, the recomputed nonce differs, the recovered signer differs from `p.payer`, and the token reverts. The configHash inside the nonce derivation provides the same term-binding that an EIP-712 intent typehash would, without needing one.
+The buyer signs the token's standard `TransferWithAuthorization` digest with this nonce. The merchant submits, _rail0_ recomputes the nonce from the supplied Payment, and calls `token.transferWithAuthorization(...)`. If the merchant tampered with any Payment field, the recomputed nonce differs, the recovered signer differs from `p.payer`, and the token reverts. The configHash inside the nonce derivation provides the same term-binding that an EIP-712 intent typehash would, without needing one.
 
 Distinct prefixes ensure an authorize-signature can't be reused for charge — the nonces don't match.
 
@@ -177,10 +179,10 @@ The domain separator is cached at construction and rebuilt automatically if `blo
 
 ### Allowance requirements
 
-RAIL0 does not custody anything outside the active escrow window. Token approvals work asymmetrically between the two parties:
+_rail0_ does not custody anything outside the active escrow window. Token approvals work asymmetrically between the two parties:
 
-- **Buyer.** **No allowance grant ever happens.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to RAIL0 atomically based on the buyer's signature alone. The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
-- **Merchant.** Must approve RAIL0 once on the token before issuing refunds (`refund` calls `transferFrom(payee, payer, amount)`). The merchant is the on-chain submitter for refund anyway, so they manage their own approval — typically `token.approve(rail0, max)` once at onboarding. Not needed for `capture` / `void` / `release` (those distribute or move funds RAIL0 already holds).
+- **Buyer.** **No allowance grant ever happens.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to _rail0_ atomically based on the buyer's signature alone. The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
+- **Merchant.** Must approve _rail0_ once on the token before issuing refunds (`refund` calls `transferFrom(payee, payer, amount)`). The merchant is the on-chain submitter for refund anyway, so they manage their own approval — typically `token.approve(rail0, max)` once at onboarding. Not needed for `capture` / `void` / `release` (those distribute or move funds _rail0_ already holds).
 
 ### Events
 
@@ -197,7 +199,7 @@ event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, addres
 event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
 ```
 
-To correlate token transfers with a `paymentId`, indexers join the token's `Transfer` events with RAIL0's lifecycle events on transaction hash and log ordering — the lifecycle event always lands in the same transaction as its corresponding transfers.
+To correlate token transfers with a `paymentId`, indexers join the token's `Transfer` events with _rail0_'s lifecycle events on transaction hash and log ordering — the lifecycle event always lands in the same transaction as its corresponding transfers.
 
 ### Errors
 
@@ -229,7 +231,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 ### Security model
 
 - **No privileged roles.** No owner, no pauser, no upgrade path. The contract code is fixed at deploy time. The token allowlist is set in the constructor and immutable thereafter.
-- **Curated trust boundary.** The deployer chooses which tokens RAIL0 will process. Including a hostile or weird ERC-20 in the allowlist is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s.
+- **Curated trust boundary.** The deployer chooses which tokens _rail0_ will process. Including a hostile or weird ERC-20 in the allowlist is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s.
 - **Reentrancy guard.** All six entrypoints (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) are protected by a `nonReentrant` modifier. Any attempt to reenter from inside a token call reverts with `Reentrancy`.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers. Even if the reentrancy guard were bypassed (it can't be) the CEI ordering already prevents same-payment double-spending.
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
@@ -245,33 +247,6 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - `paymentId` slots are never deleted; reusing an ID always reverts.
 - The token allowlist is fixed at deployment; new stablecoins require a new deployment.
 
-### Deployments
-
-| Chain | RAIL0 address | Accepted tokens |
-|-------|---------------|-----------------|
-| _none yet_ | | |
-
-### Gas sponsorship
-
-There is no separate sponsorship layer in RAIL0. Sponsorship is just "the merchant submits the transaction" — the meta-transaction pattern handles it for free.
-
-The mechanics: the buyer signs an EIP-3009 `TransferWithAuthorization` over the token's domain off-chain. The merchant (or any third party) takes that signature plus the Payment terms and submits a regular Ethereum transaction calling `authorize` / `charge`. The submitter is the `tx.origin`, so the submitter pays gas natively in the chain's gas asset. On stablecoin-gas chains, that's the same stablecoin the merchant is settling in — no second asset to manage.
-
-**Who can sponsor?**
-
-Anyone willing to submit the transaction. The protocol doesn't track sponsors, doesn't require deposits, doesn't validate sponsor identity. Common patterns:
-
-- **Merchant submits.** The most common case. Merchant runs a checkout backend that takes the buyer's signed intent + Payment terms and submits the tx. Merchant absorbs gas as a cost of acceptance, exactly like card interchange.
-- **Platform / payment facilitator submits.** A platform aggregating many merchants can run a single relayer that submits txs for all of them. Bills the merchants off-chain.
-- **Third-party relayer submits.** Anyone with stablecoin balance and a will to pay gas. Could be a grant-funded relayer subsidizing categories of transactions.
-- **Buyer submits themselves.** Always allowed — the buyer can sign + submit in one go if they prefer. Wallet shows two prompts (sign typed data, then submit transaction). Useful when the buyer doesn't trust any specific merchant/relayer to submit.
-
-In all cases, **the submitter pays gas, the buyer never broadcasts a transaction**, and the buyer's wallet only ever signs typed data.
-
-**What about release?**
-
-`release` is callable by anyone (not just the buyer). Funds always go to `p.payer` regardless of submitter, so there is no theft potential. A buyer who has been ghosted by the merchant doesn't need to hold the chain's gas asset to recover their funds — a relayer or watchdog service can submit the release on their behalf.
-
 ## Examples
 
 End-to-end `cast` recipes for every workflow. Examples use `--private-key` for readability — in production, prefer `cast wallet import <name>` once and then `--account <name>` on each command (never put long-lived keys on the command line).
@@ -282,7 +257,7 @@ Set the addresses and keys you'll reuse:
 
 ```sh
 export RPC=https://rpc.example.network
-export RAIL0=0x...                  # the RAIL0 deployment
+export RAIL0=0x...                  # the _rail0_ deployment
 export TOKEN=0x...                  # an accepted stablecoin
 export PAYER=0x...                  # buyer wallet
 export PAYEE=0x...                  # merchant wallet
@@ -302,7 +277,7 @@ export PAYMENT_ID=$(cast keccak "order-12345")
 
 ### One-time merchant approval
 
-The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant does need to approve RAIL0 once, because captured funds live in the merchant's own wallet (not in the contract), so refunds work by pulling from there via `transferFrom` — which requires a standing allowance:
+The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant does need to approve _rail0_ once, because captured funds live in the merchant's own wallet (not in the contract), so refunds work by pulling from there via `transferFrom` — which requires a standing allowance:
 
 ```sh
 cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
@@ -314,7 +289,7 @@ cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
 The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's domain. The merchant submits and pays gas. In production a wallet SDK handles the EIP-712 signing; the cast equivalent below builds the digest manually.
 
 ```sh
-# 1. Compute the deterministic EIP-3009 nonce that RAIL0 expects
+# 1. Compute the deterministic EIP-3009 nonce that _rail0_ expects
 CONFIG_HASH=$(cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" --rpc-url $RPC)
 NONCE=$(cast call $RAIL0 "authorizeNonce(bytes32,bytes32)(bytes32)" \
   $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
