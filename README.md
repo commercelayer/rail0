@@ -3,6 +3,8 @@
   <img src="logo/rail0_payoff_black.svg" alt="RAIL0 — Peer-to-peer stablecoin payments for commerce" width="400">
 </picture>
 
+---
+
 The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can implement, run, and build on without permission. Payments are the conspicuous exception. Online commerce today still routes through a layered stack of intermediaries (networks, processors, gateways, issuers, acquirers), each taking a fee, adding latency, and reserving the right to refuse service. Cross-border settlement is slow and expensive. Refunds and disputes happen off-rail. Programmable money, twenty years into the API economy, is still mostly marketing.
 
 Stablecoins changed the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
