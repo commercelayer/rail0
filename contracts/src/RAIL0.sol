@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import { IERC20, IEIP3009 } from "./interfaces/IERC20.sol";
 
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
-/// @notice Authorize, capture, void, reclaim, and refund stablecoin payments on any
+/// @notice Authorize, capture, void, release, and refund stablecoin payments on any
 ///         EVM-compatible chain whose accepted tokens implement EIP-3009
 ///         (`transferWithAuthorization`). Buyer-initiated operations use a single
 ///         EIP-3009 signature: the buyer signs off-chain, anyone (typically the
@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    uint256 public constant VERSION = 3;
+    uint256 public constant VERSION = 4;
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -37,7 +37,7 @@ contract RAIL0 {
     bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
-    bytes32 internal constant _VERSION_HASH = keccak256(bytes("3"));
+    bytes32 internal constant _VERSION_HASH = keccak256(bytes("4"));
 
     /// @dev Reentrancy lock states.
     uint256 private constant _NOT_ENTERED = 1;
@@ -111,7 +111,7 @@ contract RAIL0 {
         address token;               // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
         uint120 maxAmount;           // upper bound on what can be authorized
         uint48  preApprovalExpiry;   // cutoff for authorize/charge
-        uint48  authorizationExpiry; // cutoff for capture; reclaim opens after
+        uint48  authorizationExpiry; // cutoff for capture; release opens after
         uint48  refundExpiry;        // cutoff for refund
         uint16  feeBps;              // fee in basis points (0–10000)
         address feeReceiver;         // recipient of fee on each capture (address(0) if no fee)
@@ -145,7 +145,7 @@ contract RAIL0 {
     event PaymentVoided(
         bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
     );
-    event PaymentReclaimed(
+    event PaymentReleased(
         bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
     );
     event PaymentRefunded(
@@ -174,7 +174,7 @@ contract RAIL0 {
     error InvalidCaptureAmount();
     error InvalidRefundAmount();
     error NothingToVoid();
-    error NothingToReclaim();
+    error NothingToRelease();
     error TokenNotAccepted();
     error DuplicateToken();
     error TransferFailed();
@@ -277,22 +277,22 @@ contract RAIL0 {
         emit PaymentCharged(paymentId, p.payer, p.payee, p, amount);
     }
 
-    /// @notice Buyer's safety net: reclaim escrowed funds after authorizationExpiry.
+    /// @notice Release escrowed funds back to the buyer after authorizationExpiry.
     /// @dev    Anyone can call this — funds always go to `p.payer` regardless of submitter,
     ///         so there is no theft potential. A buyer who has been ghosted by the merchant
     ///         doesn't need to hold the chain's gas asset to recover their funds; a relayer
     ///         or watchdog service can submit on their behalf.
-    function reclaim(bytes32 paymentId, Payment calldata p) external nonReentrant {
+    function release(bytes32 paymentId, Payment calldata p) external nonReentrant {
         PaymentState memory s = _loadAndVerify(paymentId, p);
         if (block.timestamp < p.authorizationExpiry) revert AuthorizationNotExpired();
-        if (s.capturableAmount == 0) revert NothingToReclaim();
+        if (s.capturableAmount == 0) revert NothingToRelease();
 
         uint120 amount = s.capturableAmount;
         _state[paymentId].capturableAmount = 0;
 
         _safeTransfer(p.token, p.payer, amount);
 
-        emit PaymentReclaimed(paymentId, p.payer, p.payee, amount);
+        emit PaymentReleased(paymentId, p.payer, p.payee, amount);
     }
 
     // ================================================================

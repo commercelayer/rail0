@@ -109,7 +109,7 @@ contract MockBadReturn {
     }
 
     // EIP-3009 stub that always reverts (so authorize/charge fail). Unused in tests
-    // since BadReturn is only used to test refund/reclaim transfer failure paths.
+    // since BadReturn is only used to test refund/release transfer failure paths.
     function transferWithAuthorization(
         address, address, uint256, uint256, uint256, bytes32, uint8, bytes32, bytes32
     ) external pure {
@@ -546,7 +546,7 @@ contract RAIL0Test is Test {
     }
 
     // ============================================================
-    //  Lifecycle: void / reclaim / refund
+    //  Lifecycle: void / release / refund
     // ============================================================
 
     function test_Void_Success() public {
@@ -570,25 +570,25 @@ contract RAIL0Test is Test {
         rail0.void(PAYMENT_ID, p);
     }
 
-    function test_Reclaim_Success() public {
+    function test_Release_Success() public {
         RAIL0.Payment memory p = _payment();
         _authorize(PAYMENT_ID, p, 100e6);
 
         vm.warp(authorizationExpiry);
         uint256 balBefore = token.balanceOf(payer);
         vm.prank(makeAddr("watchdog"));
-        rail0.reclaim(PAYMENT_ID, p);
+        rail0.release(PAYMENT_ID, p);
 
         assertEq(token.balanceOf(payer), balBefore + 100e6);
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 0);
     }
 
-    function test_Reclaim_RevertsBeforeAuthExpiry() public {
+    function test_Release_RevertsBeforeAuthExpiry() public {
         RAIL0.Payment memory p = _payment();
         _authorize(PAYMENT_ID, p, 100e6);
 
         vm.expectRevert(RAIL0.AuthorizationNotExpired.selector);
-        rail0.reclaim(PAYMENT_ID, p);
+        rail0.release(PAYMENT_ID, p);
     }
 
     function test_Refund_Success() public {
@@ -820,7 +820,7 @@ contract RAIL0Test is Test {
         // _safeTransfer reverts as expected when the token returns false.
         MockBadReturn bad = new MockBadReturn();
         // This deployment only supports the bad token — but we can't authorize because
-        // its transferWithAuthorization always reverts. Instead test reclaim->_safeTransfer.
+        // its transferWithAuthorization always reverts. Instead test release->_safeTransfer.
         // Since we can't even create state on a bad token (authorize would revert), we
         // just confirm here that _safeTransfer's failure path is exercised by other
         // tests (e.g., test_Refund_RevertsIfNoStandingApproval).
