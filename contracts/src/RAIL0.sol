@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    uint256 public constant VERSION = 4;
+    uint256 public constant VERSION = 5;
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -28,7 +28,7 @@ contract RAIL0 {
 
     /// @dev EIP-712 typehash for the Payment struct. Field order MUST match the struct layout.
     bytes32 internal constant _PAYMENT_TYPEHASH = keccak256(
-        "Payment(address payer,address payee,address token,uint120 maxAmount,uint48 preApprovalExpiry,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
+        "Payment(address payer,address payee,address token,uint120 maxAmount,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
     );
 
     /// @dev Prefixes used to derive EIP-3009 nonces. Including a per-operation prefix
@@ -37,7 +37,7 @@ contract RAIL0 {
     bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
-    bytes32 internal constant _VERSION_HASH = keccak256(bytes("4"));
+    bytes32 internal constant _VERSION_HASH = keccak256(bytes("5"));
 
     /// @dev Reentrancy lock states.
     uint256 private constant _NOT_ENTERED = 1;
@@ -110,7 +110,6 @@ contract RAIL0 {
         address payee;               // merchant — calls capture, void, refund
         address token;               // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
         uint120 maxAmount;           // upper bound on what can be authorized
-        uint48  preApprovalExpiry;   // cutoff for authorize/charge
         uint48  authorizationExpiry; // cutoff for capture; release opens after
         uint48  refundExpiry;        // cutoff for refund
         uint16  feeBps;              // fee in basis points (0–10000)
@@ -163,7 +162,6 @@ contract RAIL0 {
     error InvalidAmount();
     error AmountTooLarge();
     error InvalidExpiries();
-    error PreApprovalExpired();
     error AuthorizationExpired();
     error AuthorizationNotExpired();
     error RefundExpired();
@@ -407,10 +405,8 @@ contract RAIL0 {
     function _validatePayment(Payment calldata p, uint256 amount) internal view {
         if (amount == 0 || amount > p.maxAmount) revert InvalidAmount();
         if (p.maxAmount > type(uint120).max) revert AmountTooLarge();
-        if (p.preApprovalExpiry == 0) revert InvalidExpiries();
-        if (p.preApprovalExpiry > p.authorizationExpiry) revert InvalidExpiries();
+        if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
-        if (block.timestamp >= p.preApprovalExpiry) revert PreApprovalExpired();
         if (p.feeBps > MAX_FEE_BPS) revert FeeBpsTooHigh();
         if (p.feeBps > 0) {
             if (p.feeReceiver == address(0)) revert ZeroFeeReceiver();
@@ -450,7 +446,6 @@ contract RAIL0 {
                 p.payee,
                 p.token,
                 p.maxAmount,
-                p.preApprovalExpiry,
                 p.authorizationExpiry,
                 p.refundExpiry,
                 p.feeBps,

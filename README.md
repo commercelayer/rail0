@@ -5,42 +5,39 @@
 
 ---
 
-The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can implement, run, and build on without permission. Payments are the conspicuous exception. Online commerce today still routes through a layered stack of intermediaries (networks, processors, gateways, issuers, acquirers), each taking a fee, adding latency, and reserving the right to refuse service. Cross-border settlement is slow and expensive. Refunds and disputes happen off-rail. Programmable money, twenty years into the API economy, is still mostly marketing.
+The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can implement, run, and build on without permission. Payments are the conspicuous exception. Online commerce today still routes through a layered stack of intermediaries (networks, processors, gateways, issuers, acquirers), each taking a fee, adding latency, and reserving the right to refuse service. Cross-border settlement is slow and expensive. Programmable money, twenty years into the API economy, is still mostly marketing.
 
-Stablecoins changed the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
+Stablecoins are changing the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
 
-RAIL0 is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster — buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. RAIL0 accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+_rail0_ is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no fee, and no privileged operator. Anyone can deploy it. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster. Buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. _rail0_ accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
-Payment rails should be open like the rest of the internet. That is the mission. The zero in RAIL0 is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, RAIL0 is the last payment rail the new era needs. The rest is just integration.
+Payment rails should be open like the rest of the Internet. That is the mission. The zero in _rail0_ is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, _rail0_ is the last payment rail the new era needs.
 
 ## Supported chains
 
-RAIL0 is built for **stablecoin-gas L1 chains with sub-second finality**, accepting tokens that implement **EIP-3009 (`transferWithAuthorization`)**. Concretely:
+_rail0_ is built for **stablecoin-native chains with sub-second finality**, accepting tokens that implement **EIP-3009 (`transferWithAuthorization`)**. Concretely:
 
 - **EVM-compatible.** Solidity 0.8.27 must compile and execute on the chain.
 - **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Merchants pay gas in the same asset they're settling in — no second gas-token to manage.
-- **L1 sovereignty.** No sequencer dependency, no withdrawal delays, no inherited security from another chain.
 - **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times.
-- **EIP-3009-capable tokens.** Each accepted token must expose `transferWithAuthorization` so the buyer can authorize transfers off-chain. USDC supports EIP-3009 on every chain; Plasma's USDT0 supports it; some legacy USDT deployments don't.
+- **EIP-3009-capable tokens.** Each accepted token must expose `transferWithAuthorization` so the buyer can authorize transfers off-chain.
 
 Currently targeted:
 
-| Chain | Status | Native gas | RAIL0 deployment |
+| Chain | Status | Native gas | _rail0_ deployment |
 |-------|--------|------------|------------------|
 | Tempo | planned | USDC (TIP-20) | _none yet_ |
 | Arc | planned | USDC | _none yet_ |
 | Plasma | planned | USDT | _none yet_ |
 | Codex | planned | USDC | _none yet_ |
 
-Chains explicitly NOT supported: anything without stablecoin-native gas (Ethereum mainnet, Base, Arbitrum, Optimism, Polygon, etc.), L2s with sequencer-controlled finality.
-
 ## Protocol
 
-RAIL0 is a permissionless, peer-to-peer payment protocol for stablecoin commerce. It implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable smart contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a single off-chain signature: the buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. No allowance is granted, no separate intent typehash, no token approval — one signature, one transaction, no broadcasted setup from the buyer.
+_rail0_ implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable smart contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a single off-chain signature: the buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. No allowance is granted, no separate intent typehash, no token approval — one signature, one transaction, no broadcasted setup from the buyer.
 
 ### Lifecycle
 
-A payment moves through three sequential time windows defined by the configuration the buyer and merchant agree on up front. Until `preApprovalExpiry`, the payment can be opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Once authorized, the merchant has until `authorizationExpiry` to `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `preApprovalExpiry ≤ authorizationExpiry ≤ refundExpiry`. Each operation is detailed below in lifecycle order.
+A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by the buyer's EIP-3009 signature `validBefore` rather than a Payment-level expiry. Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -78,7 +75,7 @@ function charge(
 
 Buyer authorizes and pays through in a single call — no escrow hold.
 
-Same EIP-3009 pattern as `authorize`, but the contract derives the nonce with `_CHARGE_NONCE_PREFIX` instead. A buyer's authorize-signature cannot be used to call `charge` (and vice versa) because the two derived nonces differ — the token would compute a different nonce when verifying and the recovered signer would not match. Preconditions are otherwise identical (fresh `paymentId`, valid amount, before `preApprovalExpiry`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
+Same EIP-3009 pattern as `authorize`, but the contract derives the nonce with `_CHARGE_NONCE_PREFIX` instead. A buyer's authorize-signature cannot be used to call `charge` (and vice versa) because the two derived nonces differ — the token would compute a different nonce when verifying and the recovered signer would not match. Preconditions are otherwise identical (fresh `paymentId`, valid amount, EIP-3009 sig still within its `validBefore`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
 
 #### Capture
 
@@ -130,7 +127,6 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 | `payee`                | `address` | Merchant. Calls `capture`, `void`, `refund`. Recipient of captured funds. |
 | `token`                | `address` | ERC-20 stablecoin. Must be in the deployment's allowlist.        |
 | `maxAmount`            | `uint120` | Upper bound on the amount the buyer can authorize.               |
-| `preApprovalExpiry`    | `uint48`  | Cutoff for `authorize` / `charge`.                               |
 | `authorizationExpiry`  | `uint48`  | Cutoff for `capture`; `release` opens after this timestamp.      |
 | `refundExpiry`         | `uint48`  | Cutoff for `refund`.                                             |
 | `feeBps`               | `uint16`  | Fee in basis points (0–10000) taken on each capture.             |
@@ -214,7 +210,6 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | `InvalidAmount`             | `amount == 0` or `amount > p.maxAmount`.                           |
 | `AmountTooLarge`            | `p.maxAmount > type(uint120).max`.                                 |
 | `InvalidExpiries`           | Expiries are zero or out of order.                                 |
-| `PreApprovalExpired`        | `block.timestamp >= p.preApprovalExpiry` at authorize/charge.      |
 | `AuthorizationExpired`      | `block.timestamp >= p.authorizationExpiry` at capture.             |
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
 | `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
@@ -240,7 +235,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 98-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, distribute-fee rounding edge cases, boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
+- **Test coverage.** A 96-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, distribute-fee rounding edge cases, boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
 
 ### Limits
 
@@ -299,9 +294,9 @@ export PAYEE_KEY=0x...              # merchant signing key (submits txs)
 The `Payment` struct is a 9-field tuple. Define it once and reuse:
 
 ```sh
-# (payer, payee, token, maxAmount, preApprovalExpiry, authorizationExpiry, refundExpiry, feeBps, feeReceiver)
-export PAYMENT="($PAYER,$PAYEE,$TOKEN,1000000000,1735689600,1736294400,1738972800,250,$FEE_RCV)"
-export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint48,uint16,address)'
+# (payer, payee, token, maxAmount, authorizationExpiry, refundExpiry, feeBps, feeReceiver)
+export PAYMENT="($PAYER,$PAYEE,$TOKEN,1000000000,1736294400,1738972800,250,$FEE_RCV)"
+export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint16,address)'
 export PAYMENT_ID=$(cast keccak "order-12345")
 ```
 

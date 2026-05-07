@@ -155,7 +155,6 @@ contract RAIL0Test is Test {
     uint256 internal payeeKey;
     address internal feeReceiver = address(0xC0FFEE);
 
-    uint48 internal preApprovalExpiry;
     uint48 internal authorizationExpiry;
     uint48 internal refundExpiry;
 
@@ -173,7 +172,6 @@ contract RAIL0Test is Test {
         (payee, payeeKey) = makeAddrAndKey("payee");
 
         vm.warp(1_700_000_000);
-        preApprovalExpiry = uint48(block.timestamp + 1 hours);
         authorizationExpiry = uint48(block.timestamp + 7 days);
         refundExpiry = uint48(block.timestamp + 30 days);
 
@@ -194,7 +192,6 @@ contract RAIL0Test is Test {
             payee: payee,
             token: address(token),
             maxAmount: 1000e6,
-            preApprovalExpiry: preApprovalExpiry,
             authorizationExpiry: authorizationExpiry,
             refundExpiry: refundExpiry,
             feeBps: 0,
@@ -371,18 +368,6 @@ contract RAIL0Test is Test {
         rail0.authorize(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, r, s);
     }
 
-    function test_Authorize_RevertsAtPreApprovalExpiry() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, FAR_FUTURE, nonce);
-
-        vm.warp(preApprovalExpiry);
-        vm.expectRevert(RAIL0.PreApprovalExpired.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, r, s);
-    }
-
     function test_Authorize_RevertsIfAmountZero() public {
         RAIL0.Payment memory p = _payment();
         bytes32 configHash = rail0.hashPayment(p);
@@ -542,18 +527,6 @@ contract RAIL0Test is Test {
             _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, FAR_FUTURE, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
-        rail0.charge(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, r, s);
-    }
-
-    function test_Charge_RevertsAtPreApprovalExpiry() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, FAR_FUTURE, nonce);
-
-        vm.warp(preApprovalExpiry);
-        vm.expectRevert(RAIL0.PreApprovalExpired.selector);
         rail0.charge(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, r, s);
     }
 
@@ -1049,18 +1022,19 @@ contract RAIL0Test is Test {
     }
 
     function test_Validation_RejectsBadExpiriesOrder() public {
+        // authorizationExpiry > refundExpiry should revert
         RAIL0.Payment memory p = _payment();
-        p.preApprovalExpiry = uint48(block.timestamp + 7 days);
-        p.authorizationExpiry = uint48(block.timestamp + 1 hours);
+        p.authorizationExpiry = uint48(block.timestamp + 30 days);
+        p.refundExpiry = uint48(block.timestamp + 7 days);
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
 
         vm.expectRevert(RAIL0.InvalidExpiries.selector);
         rail0.authorize(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, r, s);
     }
 
-    function test_Validation_RejectsZeroPreApprovalExpiry() public {
+    function test_Validation_RejectsZeroAuthorizationExpiry() public {
         RAIL0.Payment memory p = _payment();
-        p.preApprovalExpiry = 0;
+        p.authorizationExpiry = 0;
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
 
         vm.expectRevert(RAIL0.InvalidExpiries.selector);
@@ -1139,11 +1113,10 @@ contract RAIL0Test is Test {
     }
 
     function test_Validation_AcceptsExpiriesEqual() public {
-        // preApprovalExpiry == authorizationExpiry == refundExpiry should be allowed
-        // (the contract uses `>` not `>=` in the ordering checks).
+        // authorizationExpiry == refundExpiry should be allowed
+        // (the contract uses `>` not `>=` in the ordering check).
         RAIL0.Payment memory p = _payment();
         uint48 t = uint48(block.timestamp + 1 hours);
-        p.preApprovalExpiry = t;
         p.authorizationExpiry = t;
         p.refundExpiry = t;
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
