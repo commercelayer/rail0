@@ -110,6 +110,25 @@ contract MockTransferFromFails is MockERC20 {
     }
 }
 
+/// Token that maintains a per-address blacklist (USDC-style freeze). Transfer to a
+/// blacklisted address reverts. Used to verify the fee-receiver DoS escape hatch:
+/// capture/charge revert if feeReceiver is blacklisted, but void/release still
+/// work because they don't call _distribute.
+contract MockBlacklistERC20 is MockERC20 {
+    mapping(address => bool) public blacklisted;
+
+    function blacklist(address a) external {
+        blacklisted[a] = true;
+    }
+
+    function transfer(address to, uint256 amount) external override returns (bool) {
+        require(!blacklisted[to], "blacklisted");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 /// Token whose transferWithAuthorization calls back into RAIL0 (reentrancy attempt).
 contract MockReentrant {
     bool public reenterAttempted;
@@ -1464,6 +1483,66 @@ contract RAIL0Test is Test {
         vm.prank(payee);
         vm.expectRevert(RAIL0.TransferFailed.selector);
         r.refund(PAYMENT_ID, p, 50e6);
+    }
+
+    // ============================================================
+    //  Fee-receiver DoS resilience (token-level blacklist)
+    // ============================================================
+    //
+    // capture/charge call _distribute → token.transfer(feeReceiver, fee). If the
+    // token issuer freezes feeReceiver (USDC-style), those calls revert. void
+    // and release skip _distribute entirely and route funds directly to the payer,
+    // so the buyer's funds always have an escape hatch.
+
+    /// @dev Helper: deploy a fresh blacklist token + RAIL0, fund payer, authorize
+    ///      with a fee, and return everything wired up so each test can blacklist
+    ///      the fee receiver and exercise its specific path.
+    function _setupBlacklistAuthorize() internal returns (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) {
+        bToken = new MockBlacklistERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(bToken);
+        r = new RAIL0(tokens);
+        bToken.mint(payer, 1000e6);
+
+        p = _payment();
+        p.token = address(bToken);
+        p.feeBps = 250;
+        p.feeReceiver = feeReceiver;
+
+        bytes32 cfg = r.hashPayment(p);
+        bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
+        (uint8 v, bytes32 rr, bytes32 ss) =
+            _sign3009(payerKey, bToken, payer, address(r), 100e6, 0, FAR_FUTURE, nonce);
+        r.authorize(PAYMENT_ID, p, 100e6, 0, FAR_FUTURE, v, rr, ss);
+    }
+
+    function test_Capture_RevertsIfFeeReceiverBlacklisted() public {
+        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
+        bToken.blacklist(feeReceiver);
+
+        vm.prank(payee);
+        vm.expectRevert(); // token reverts inside _distribute → capture aborts
+        r.capture(PAYMENT_ID, p, 100e6);
+    }
+
+    function test_Void_WorksEvenIfFeeReceiverBlacklisted() public {
+        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
+        bToken.blacklist(feeReceiver);
+
+        uint256 payerBefore = bToken.balanceOf(payer);
+        vm.prank(payee);
+        r.void(PAYMENT_ID, p);
+        assertEq(bToken.balanceOf(payer), payerBefore + 100e6, "void returns full escrow to payer");
+    }
+
+    function test_Release_WorksEvenIfFeeReceiverBlacklisted() public {
+        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
+        bToken.blacklist(feeReceiver);
+
+        vm.warp(uint256(p.authorizationExpiry));
+        uint256 payerBefore = bToken.balanceOf(payer);
+        r.release(PAYMENT_ID, p); // anyone may call
+        assertEq(bToken.balanceOf(payer), payerBefore + 100e6, "release returns full escrow to payer");
     }
 
     // ============================================================
