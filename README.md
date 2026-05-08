@@ -26,11 +26,11 @@ _rail0_ is built for **stablecoin-native chains with sub-second finality**, acce
 
 Currently targeted:
 
-| Chain | Status | Stablecoin(s) | _rail0_ deployment |
-|-------|--------|------------|------------------|
-| Tempo | planned | (TIP-20) | _none yet_ |
-| Arc | planned | USDC, EURC | _none yet_ |
-| Plasma | planned | USDT | _none yet_ |
+| Chain | Network | Stablecoin(s) | _rail0_ address |
+|-------|---------|---------------|-----------------|
+| Arc | testnet | USDC, EURC | [`0x6187...e445`](https://testnet.arcscan.app/address/0x618794795850A9fbBd3B5AD88Abb8C638a8Ce445) |
+| Plasma | testnet | USDT0 | _planned_ |
+| Tempo | — | TIP-20 (EIP-2612 only today) | _waiting on EIP-3009_ |
 
 ## Protocol
 
