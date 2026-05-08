@@ -457,3 +457,7 @@ contracts/
 └── test/
     └── RAIL0.t.sol                # full test suite (lifecycle + meta-tx auth + reentrancy)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
