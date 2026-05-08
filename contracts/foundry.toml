@@ -20,3 +20,13 @@ bracket_spacing = true
 # saving is ~30 gas per call on functions that aren't in any hot loop, and
 # inline assembly hurts readability — not worth the trade.
 exclude_lints = ["asm-keccak256"]
+
+[rpc_endpoints]
+moderato        = "https://rpc.moderato.tempo.xyz"
+tempo           = "https://rpc.tempo.xyz"
+arc-testnet     = "https://rpc.testnet.arc.network"
+plasma-testnet  = "https://testnet-rpc.plasma.to"
+
+[etherscan]
+tempo    = { url = "https://contracts.tempo.xyz", chain = 4217,  key = "" }
+moderato = { url = "https://contracts.tempo.xyz", chain = 42431, key = "" }

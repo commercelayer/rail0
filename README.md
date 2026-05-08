@@ -445,7 +445,23 @@ forge build
 forge test
 ```
 
-The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, transferFrom-fails, and reentrant cases, so no fork or RPC is needed.
+The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, transferFrom-fails, blacklist (USDC-style freeze), and reentrant cases, so no fork or RPC is needed.
+
+### Deployment
+
+A Foundry deploy script lives at `contracts/script/Deploy.s.sol`. The token allowlist is read from `RAIL0_ACCEPTED_TOKENS` (comma-separated, no spaces) and is **immutable** after deployment — list every stablecoin this deployment should accept up front.
+
+```sh
+cast wallet import deployer --interactive          # one-time, prompts for key
+export RAIL0_ACCEPTED_TOKENS=0x...,0x...
+
+forge script script/Deploy.s.sol \
+  --rpc-url $RPC \
+  --account deployer \
+  --broadcast
+```
+
+See `contracts/.env.example` for the full set of environment variables.
 
 ### Layout
 
@@ -456,6 +472,8 @@ contracts/
 │   ├── RAIL0.sol                  # the protocol contract
 │   └── interfaces/
 │       └── IERC20.sol             # IERC20 + IEIP3009 (TransferWithAuthorization)
+├── script/
+│   └── Deploy.s.sol               # deploy script (reads RAIL0_ACCEPTED_TOKENS)
 └── test/
     └── RAIL0.t.sol                # full test suite (lifecycle + meta-tx auth + reentrancy)
 ```
