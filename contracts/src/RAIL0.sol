@@ -428,6 +428,13 @@ contract RAIL0 {
         if (_configHash[paymentId] != _hash(p)) revert PaymentMismatch();
     }
 
+    /// @dev Split `amount` between fee receiver and payee. Integer (floor) division means
+    ///      sub-unit dust always rounds toward the payee — the fee receiver absorbs the
+    ///      rounding loss and `fee + (amount - fee) == amount` exactly. Conservation holds
+    ///      for every input. Splitting one capture into N smaller partials therefore lowers
+    ///      total fee revenue when each partial floors independently; this is intentional
+    ///      and documented for facilitators sizing fees at expected capture granularity.
+    ///      No overflow: amount ≤ uint120.max and feeBps ≤ 10_000, so the product fits uint256.
     function _distribute(Payment calldata p, uint256 amount) internal {
         uint256 fee = (amount * p.feeBps) / MAX_FEE_BPS;
         if (fee > 0) {

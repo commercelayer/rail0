@@ -645,6 +645,132 @@ contract RAIL0Test is Test {
     }
 
     // ============================================================
+    //  Fee distribution: rounding & dust
+    // ============================================================
+    //
+    // _distribute uses floor division: fee = (amount * feeBps) / 10_000.
+    // Invariants verified by these tests:
+    //   1. Sub-unit dust rounds toward the payee (fee receiver eats the loss).
+    //   2. Conservation: feeReceiver + payee == amount, exactly, for every input.
+    //   3. No overflow at uint120.max amount × max feeBps.
+    //   4. Splitting one capture into N partials lowers total fees because each
+    //      partial floors to fee=0 independently — documented behavior, not a bug.
+
+    /// @dev feeBps=250 (2.5%), amount=39 → fee=(39*250)/10000=0. Payee gets full 39.
+    function test_Capture_FeeRoundsDownDustToZero() public {
+        RAIL0.Payment memory p = _paymentWithFee(); // feeBps=250
+        _authorize(PAYMENT_ID, p, 39);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 39);
+
+        assertEq(token.balanceOf(feeReceiver), 0, "fee floors to 0");
+        assertEq(token.balanceOf(payee), 39, "payee absorbs the dust");
+    }
+
+    /// @dev feeBps=250, amount=399 → (399*250)/10000 = 99750/10000 = 9 (truncated from 9.975).
+    ///      Payee gets 390, fee receiver gets 9. Conservation: 9 + 390 == 399.
+    function test_Capture_FeeRoundsDownTowardsPayee() public {
+        RAIL0.Payment memory p = _paymentWithFee();
+        _authorize(PAYMENT_ID, p, 399);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 399);
+
+        assertEq(token.balanceOf(feeReceiver), 9, "9.975 floored to 9");
+        assertEq(token.balanceOf(payee), 390);
+    }
+
+    /// @dev Conservation check across a table of (feeBps, amount) — payee + feeReceiver
+    ///      must equal amount exactly for every combination.
+    function test_Capture_FeeMath_Conservation() public {
+        uint16[5] memory bpsTable = [uint16(1), 100, 250, 9_999, 10_000];
+        uint120[5] memory amountTable = [uint120(1), 7, 9_999, 100e6, 1e18];
+
+        for (uint256 i = 0; i < bpsTable.length; i++) {
+            for (uint256 j = 0; j < amountTable.length; j++) {
+                _runConservationCase(bpsTable[i], amountTable[j], i * amountTable.length + j);
+            }
+        }
+    }
+
+    /// @dev Helper extracted to keep stack pressure down inside the nested loop above.
+    function _runConservationCase(uint16 bps, uint120 amount, uint256 salt) internal {
+        bytes32 paymentId = keccak256(abi.encodePacked("conservation", salt));
+
+        RAIL0.Payment memory p = _payment();
+        p.maxAmount = amount;
+        p.feeBps = bps;
+        p.feeReceiver = bps == 0 ? address(0) : feeReceiver;
+
+        // Top up payer so we don't run out across iterations.
+        token.mint(payer, amount);
+
+        uint256 payeeBefore = token.balanceOf(payee);
+        uint256 feeRcvBefore = token.balanceOf(feeReceiver);
+
+        _charge(paymentId, p, amount);
+
+        uint256 paidToPayee = token.balanceOf(payee) - payeeBefore;
+        uint256 paidToFee = token.balanceOf(feeReceiver) - feeRcvBefore;
+
+        assertEq(paidToPayee + paidToFee, amount, "conservation: payee + fee == amount");
+        assertEq(paidToFee, (uint256(amount) * bps) / 10_000, "fee matches floor formula");
+    }
+
+    /// @dev Stress the multiplication: amount near uint120.max × max feeBps must not overflow
+    ///      and must distribute correctly. uint120.max ≈ 1.3e36; × 9999 ≈ 1.3e40, far below 2^256.
+    function test_Capture_FeeMath_NoOverflowAtMaxAmount() public {
+        uint120 huge = type(uint120).max;
+
+        RAIL0.Payment memory p = _payment();
+        p.maxAmount = huge;
+        p.feeBps = 9_999;
+        p.feeReceiver = feeReceiver;
+
+        token.mint(payer, huge);
+
+        _charge(PAYMENT_ID, p, huge);
+
+        uint256 expectedFee = (uint256(huge) * 9_999) / 10_000;
+        assertEq(token.balanceOf(feeReceiver), expectedFee);
+        assertEq(token.balanceOf(payee), uint256(huge) - expectedFee);
+        assertEq(token.balanceOf(feeReceiver) + token.balanceOf(payee), huge, "conservation at max");
+    }
+
+    /// @dev Splitting captures lowers total fee due to per-partial flooring. With feeBps=100
+    ///      (1%) on 99 units: one capture → fee=0 (floors); 33+33+33 → also 0 each. With
+    ///      feeBps=100 on 9999: one capture → fee=99; 3333+3333+3333 → 33+33+33=99 (no loss).
+    ///      But on 100 with feeBps=100: one capture → fee=1; 50+50 → 0+0 = 0 (lost fee).
+    ///      This test pins down that documented gotcha.
+    function test_Capture_SplittingPartialsCanReduceTotalFee() public {
+        RAIL0.Payment memory p = _payment();
+        p.feeBps = 100; // 1%
+        p.feeReceiver = feeReceiver;
+
+        _authorize(PAYMENT_ID, p, 100);
+
+        vm.startPrank(payee);
+        rail0.capture(PAYMENT_ID, p, 50);
+        rail0.capture(PAYMENT_ID, p, 50);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(feeReceiver), 0, "two 50-unit captures: each fee floors to 0");
+        assertEq(token.balanceOf(payee), 100, "merchant kept the dust both times");
+    }
+
+    /// @dev Same dust scenario via charge (one-shot): on a 39-unit charge at feeBps=250,
+    ///      fee is 0 and payee receives the full 39. Verifies _distribute behaves
+    ///      identically when invoked from the charge path.
+    function test_Charge_FeeRoundsDownDustToZero() public {
+        RAIL0.Payment memory p = _paymentWithFee();
+        _charge(PAYMENT_ID, p, 39);
+
+        assertEq(token.balanceOf(feeReceiver), 0);
+        assertEq(token.balanceOf(payee), 39);
+    }
+
+    // ============================================================
     //  Lifecycle: void / release / refund
     // ============================================================
 

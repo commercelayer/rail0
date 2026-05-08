@@ -7,13 +7,13 @@
 
 The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can implement, run, and build on without permission. Payments are the conspicuous exception. Online commerce today still routes through a layered stack of intermediaries (networks, processors, gateways, issuers, acquirers), each taking a fee, adding latency, and reserving the right to refuse service. Cross-border settlement is slow and expensive. Programmable money, twenty years into the API economy, is still mostly marketing.
 
-Stablecoins are changing the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money. So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
+Stablecoins are changing the substrate. A dollar can move between two wallets in under a second, anywhere in the world, for fractions of a cent, without anyone's permission. **But a transfer alone isn't commerce. Commerce needs the primitives card networks have always provided — authorization, capture, refund, dispute windows — around the bare movement of money.** So far, the only way to get those primitives has been to plug back into the legacy stack and inherit its costs.
 
-_rail0_ is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, and no privileged operator. The protocol supports optional facilitator fees: each payment can include a `feeBps` and `feeReceiver` so an API provider, checkout SDK, or payment platform can route a portion of each capture to themselves automatically. Fees, when present, are negotiated between merchant and facilitator and committed in the payment terms.
+_rail0_ is the alternative: a single immutable smart contract that implements the full authorize → capture → refund lifecycle for stablecoin payments, with no owner, no admin, no protocol fee, and no privileged operator. Facilitators have a clean entry point. Every payment can include a `feeBps` and `feeReceiver`, so an API provider, checkout SDK, or payment platform can take a negotiated share of each capture. Fees are agreed between merchant and facilitator, committed in the Payment terms, and routed by the contract — **never imposed by the protocol.**
 
-Anyone can deploy the contract. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster. Buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. _rail0_ accepts any ERC-20 stablecoin and adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
+Anyone can deploy the contract. Anyone can use it. Buyer-initiated operations work like a signed check: the buyer signs a per-payment authorization off-chain, the merchant submits the transaction, and the merchant pays gas natively in the chain's stablecoin. No bundlers, no smart-account wallets required, no separate paymaster. Buyer keeps any wallet that signs typed data, merchant absorbs the cost of acceptance the way they always have under card networks. _rail0_ adds nothing between buyer and merchant beyond the rules of the contract itself — rules that are public, immutable, and the same for everyone.
 
-Payment rails should be open like the rest of the Internet. That is the mission. The zero in _rail0_ is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, _rail0_ is the last payment rail the new era needs.
+Payment rails should be open like the rest of the internet. That is the mission. The zero in _rail0_ is literal: zero intermediaries between buyer and merchant, zero protocol fees, zero privileged operators, zero permission required to deploy or to use. It also marks day zero — the moment payments stop being a service rented from someone else's network and become a commodity protocol the way HTTP is. If we get this right, _rail0_ is the last payment rail the new era needs.
 
 ## Supported chains
 
@@ -86,7 +86,7 @@ function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external
 
 Merchant pulls funds from escrow into their wallet (and any fee out to `feeReceiver`).
 
-Only `p.payee` may call. Must run before `p.authorizationExpiry`, with `0 < amount ≤ capturableAmount`. State is updated atomically: `capturableAmount -= amount` and `refundableAmount += amount`, so refunds remain available against the captured slice until `refundExpiry`. Funds move via `_distribute`: `fee = amount × feeBps / 10_000` goes to `feeReceiver` and the remainder to `payee`, both as ERC-20 `transfer` calls. Captures may be partial and repeated — a merchant can split a single authorization across multiple captures (e.g. as items in an order ship over time) up to the originally authorized amount.
+Only `p.payee` may call. Must run before `p.authorizationExpiry`, with `0 < amount ≤ capturableAmount`. State is updated atomically: `capturableAmount -= amount` and `refundableAmount += amount`, so refunds remain available against the captured slice until `refundExpiry`. Funds move via `_distribute`: `fee = amount × feeBps / 10_000` goes to `feeReceiver` and the remainder to `payee`, both as ERC-20 `transfer` calls. Fee math uses integer (floor) division — sub-unit dust accrues to the merchant, so settlement is always exact (`fee + payee == amount`) and the fee receiver absorbs any rounding loss. Captures may be partial and repeated — a merchant can split a single authorization across multiple captures (e.g. as items in an order ship over time) up to the originally authorized amount.
 
 #### Void
 
@@ -157,7 +157,7 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="3", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="5", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -237,7 +237,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 96-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, distribute-fee rounding edge cases, boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
+- **Test coverage.** A 102-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, fee-distribution rounding (dust flooring, conservation across (amount, feeBps) combinations, no-overflow at `uint120.max` × max fee, partial-capture splitting effects), boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
 
 ### Limits
 
@@ -266,7 +266,7 @@ export PAYER_KEY=0x...              # buyer signing key (signs EIP-3009 Transfer
 export PAYEE_KEY=0x...              # merchant signing key (submits txs)
 ```
 
-The `Payment` struct is a 9-field tuple. Define it once and reuse:
+The `Payment` struct is an 8-field tuple. Define it once and reuse:
 
 ```sh
 # (payer, payee, token, maxAmount, authorizationExpiry, refundExpiry, feeBps, feeReceiver)
@@ -323,7 +323,7 @@ cast send $RAIL0 \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-In production, the buyer's wallet (Metamask, Rabby, hardware) renders this as a standard EIP-3009 `TransferWithAuthorization` prompt and signs via `eth_signTypedData_v4`. No separate intent typehash is needed — the deterministic nonce binds the signature to the Payment terms.
+In production, the buyer's wallet (MetaMask, Rabby, hardware) renders this as a standard EIP-3009 `TransferWithAuthorization` prompt and signs via `eth_signTypedData_v4`. No separate intent typehash is needed — the deterministic nonce binds the signature to the Payment terms.
 
 ### Capture (merchant)
 
@@ -443,7 +443,7 @@ forge build
 forge test
 ```
 
-The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard, USDT-style (no return value), reverting, and reentrant cases, so no fork or RPC is needed.
+The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, transferFrom-fails, and reentrant cases, so no fork or RPC is needed.
 
 ### Layout
 
@@ -453,7 +453,7 @@ contracts/
 ├── src/
 │   ├── RAIL0.sol                  # the protocol contract
 │   └── interfaces/
-│       └── IERC20.sol             # IERC20 + IERC20Permit
+│       └── IERC20.sol             # IERC20 + IEIP3009 (TransferWithAuthorization)
 └── test/
     └── RAIL0.t.sol                # full test suite (lifecycle + meta-tx auth + reentrancy)
 ```
