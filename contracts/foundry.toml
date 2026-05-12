@@ -26,7 +26,9 @@ moderato        = "https://rpc.moderato.tempo.xyz"
 tempo           = "https://rpc.tempo.xyz"
 arc-testnet     = "https://rpc.testnet.arc.network"
 plasma-testnet  = "https://testnet-rpc.plasma.to"
+celo-sepolia    = "https://forno.celo-sepolia.celo-testnet.org"
 
 [etherscan]
-tempo    = { url = "https://contracts.tempo.xyz", chain = 4217,  key = "" }
-moderato = { url = "https://contracts.tempo.xyz", chain = 42431, key = "" }
+tempo         = { url = "https://contracts.tempo.xyz",              chain = 4217,     key = "" }
+moderato      = { url = "https://contracts.tempo.xyz",              chain = 42431,    key = "" }
+celo-sepolia  = { url = "https://celo-sepolia.blockscout.com/api/", chain = 11142220, key = "" }
