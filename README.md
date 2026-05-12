@@ -38,7 +38,7 @@ _rail0_ implements the authorize → capture → refund lifecycle familiar from 
 
 ### Lifecycle
 
-A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by the buyer's EIP-3009 signature `validBefore`. Each operation is detailed below in lifecycle order.
+A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so a single field controls both the submission deadline and (for `authorize`) the merchant's capture window. Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -47,8 +47,6 @@ function authorize(
     bytes32 paymentId,
     Payment calldata p,
     uint256 amount,
-    uint256 validAfter,
-    uint256 validBefore,
     uint8 v,
     bytes32 r,
     bytes32 s
@@ -57,7 +55,7 @@ function authorize(
 
 Buyer escrows `amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = amount`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits this transaction. The contract validates the config (expiries in order, fee within bounds, addresses non-zero, token in the deployment's allowlist), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce. The token's own EIP-712 sig check verifies the buyer's signature; if anything was tampered (different Payment terms, different amount, different recipient), the recovered signer won't match `p.payer` and the token reverts. The deterministic-nonce trick is what binds the buyer's signature to the exact Payment terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, `release` opens after `authorizationExpiry`.
+The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits this transaction. The contract validates the config (expiries in order and not in the past, fee within bounds, addresses non-zero, token in the deployment's allowlist), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce and the pinned validity window. The token's own EIP-712 sig check verifies the buyer's signature; if anything was tampered (different Payment terms, different amount, different recipient), the recovered signer won't match `p.payer` and the token reverts. The deterministic-nonce trick is what binds the buyer's signature to the exact Payment terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, partial or full) before `authorizationExpiry`, or `void` at any time. If neither happens, `release` opens after `authorizationExpiry`.
 
 #### Charge
 
@@ -66,8 +64,6 @@ function charge(
     bytes32 paymentId,
     Payment calldata p,
     uint256 amount,
-    uint256 validAfter,
-    uint256 validBefore,
     uint8 v,
     bytes32 r,
     bytes32 s
@@ -76,7 +72,7 @@ function charge(
 
 Buyer authorizes and pays through in a single call — no escrow hold.
 
-Same EIP-3009 pattern as `authorize`, but the contract derives the nonce with `_CHARGE_NONCE_PREFIX` instead. A buyer's authorize-signature cannot be used to call `charge` (and vice versa) because the two derived nonces differ — the token would compute a different nonce when verifying and the recovered signer would not match. Preconditions are otherwise identical (fresh `paymentId`, valid amount, EIP-3009 sig still within its `validBefore`). The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
+Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and `validBefore = p.authorizationExpiry` in the signed payload), but the contract derives the nonce with `_CHARGE_NONCE_PREFIX` instead. A buyer's authorize-signature cannot be used to call `charge` (and vice versa) because the two derived nonces differ — the token would compute a different nonce when verifying and the recovered signer would not match. Preconditions are otherwise identical (fresh `paymentId`, valid amount, current time before `authorizationExpiry`). Here `authorizationExpiry` doubles as the submission deadline only — there is no escrow window. The difference is settlement: instead of leaving funds in the contract, `charge` immediately calls `_distribute` to send `amount × feeBps / 10_000` to `feeReceiver` and the remainder to `payee`. State is recorded with `capturableAmount = 0` and `refundableAmount = amount`, so the merchant can still issue refunds against this payment until `refundExpiry`. Use this when the merchant doesn't need a separate fulfillment window — e.g. digital goods, instant services, or any flow where there is nothing to "capture later."
 
 #### Capture
 
@@ -239,7 +235,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound. The merchant must keep an ERC-20 allowance to _rail0_ for the duration of any active `refundExpiry` (since `refund` pulls via `transferFrom`). Best practice is to set bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not to set `refundExpiry` to the far future.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** A 105-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, expired `validBefore`, not-yet-valid `validAfter`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, fee-distribution rounding (dust flooring, conservation across (amount, feeBps) combinations, no-overflow at `uint120.max` × max fee, partial-capture splitting effects), fee-receiver blacklist DoS resilience (`capture` reverts; `void`/`release` recover), boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
+- **Test coverage.** A 103-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, fee-distribution rounding (dust flooring, conservation across (amount, feeBps) combinations, no-overflow at `uint120.max` × max fee, partial-capture splitting effects), fee-receiver blacklist DoS resilience (`capture` reverts; `void`/`release` recover), boundary conditions (equal expiries, max feeBps, amount equals maxAmount, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
 
 ### Limits
 
@@ -271,8 +267,12 @@ export PAYEE_KEY=0x...              # merchant signing key (submits txs)
 The `Payment` struct is an 8-field tuple. Define it once and reuse:
 
 ```sh
+export MAX_AMOUNT=1000000000        # 1000 USDC at 6 decimals — upper bound per-Payment
+export AUTH_EXPIRY=1736294400       # authorize-by / capture-by deadline (Unix seconds)
+export REFUND_EXPIRY=1738972800     # refund-by deadline (Unix seconds)
+
 # (payer, payee, token, maxAmount, authorizationExpiry, refundExpiry, feeBps, feeReceiver)
-export PAYMENT="($PAYER,$PAYEE,$TOKEN,1000000000,1736294400,1738972800,250,$FEE_RCV)"
+export PAYMENT="($PAYER,$PAYEE,$TOKEN,$MAX_AMOUNT,$AUTH_EXPIRY,$REFUND_EXPIRY,250,$FEE_RCV)"
 export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint16,address)'
 export PAYMENT_ID=$(cast keccak "order-12345")
 ```
@@ -296,18 +296,21 @@ CONFIG_HASH=$(cast call $RAIL0 "hashPayment($PAYMENT_TYPE)(bytes32)" "$PAYMENT" 
 NONCE=$(cast call $RAIL0 "authorizeNonce(bytes32,bytes32)(bytes32)" \
   $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
 
-# 2. Pick a validity window
-VALID_AFTER=0
-VALID_BEFORE=$(($(date +%s) + 600))   # 10 minutes from now
+# 2. The amount being authorized. _rail0_ pins the EIP-3009 validity window —
+#    validAfter is always 0 and validBefore is always p.authorizationExpiry — so
+#    you don't pick them, but you still need them to compute the digest in step 3.
 AMOUNT=100000000                       # 100 USDC at 6 decimals
 
-# 3. Build the EIP-3009 TransferWithAuthorization digest (over the TOKEN's domain)
+# 3. Build the EIP-3009 TransferWithAuthorization digest (over the TOKEN's domain).
+#    The 5th and 6th args below (validAfter=0, validBefore=$AUTH_EXPIRY) are the
+#    pinned constants — change them and _rail0_'s call to the token will reject
+#    the signature.
 TOKEN_DOMAIN=$(cast call $TOKEN "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC)
 TWA_TYPEHASH=$(cast keccak \
   "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
 STRUCT_HASH=$(cast keccak $(cast abi-encode \
   "f(bytes32,address,address,uint256,uint256,uint256,bytes32)" \
-  $TWA_TYPEHASH $PAYER $RAIL0 $AMOUNT $VALID_AFTER $VALID_BEFORE $NONCE))
+  $TWA_TYPEHASH $PAYER $RAIL0 $AMOUNT 0 $AUTH_EXPIRY $NONCE))
 DIGEST=$(cast keccak 0x1901${TOKEN_DOMAIN:2}${STRUCT_HASH:2})
 
 # 4. Buyer signs the raw digest
@@ -320,8 +323,8 @@ V=0x${SIG:130:2}
 
 # 6. Merchant submits the transaction and pays gas
 cast send $RAIL0 \
-  "authorize(bytes32,$PAYMENT_TYPE,uint256,uint256,uint256,uint8,bytes32,bytes32)" \
-  $PAYMENT_ID "$PAYMENT" $AMOUNT $VALID_AFTER $VALID_BEFORE $V $R $S \
+  "authorize(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" $AMOUNT $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
@@ -361,8 +364,8 @@ NONCE=$(cast call $RAIL0 "chargeNonce(bytes32,bytes32)(bytes32)" \
 
 # Build digest with the new nonce, sign, split, then:
 cast send $RAIL0 \
-  "charge(bytes32,$PAYMENT_TYPE,uint256,uint256,uint256,uint8,bytes32,bytes32)" \
-  $PAYMENT_ID "$PAYMENT" $AMOUNT $VALID_AFTER $VALID_BEFORE $V $R $S \
+  "charge(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" $AMOUNT $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 

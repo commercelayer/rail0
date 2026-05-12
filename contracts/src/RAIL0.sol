@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    uint256 public constant VERSION = 5;
+    uint256 public constant VERSION = 6;
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -37,7 +37,7 @@ contract RAIL0 {
     bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
-    bytes32 internal constant _VERSION_HASH = keccak256(bytes("5"));
+    bytes32 internal constant _VERSION_HASH = keccak256(bytes("6"));
 
     /// @dev Reentrancy lock states.
     uint256 private constant _NOT_ENTERED = 1;
@@ -106,21 +106,21 @@ contract RAIL0 {
 
     /// @notice Immutable payment configuration committed at authorize/charge time.
     struct Payment {
-        address payer;               // buyer — funds are pulled from this address
-        address payee;               // merchant — calls capture, void, refund
-        address token;               // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
-        uint120 maxAmount;           // upper bound on what can be authorized
-        uint48  authorizationExpiry; // cutoff for capture; release opens after
-        uint48  refundExpiry;        // cutoff for refund
-        uint16  feeBps;              // fee in basis points (0–10000)
-        address feeReceiver;         // recipient of fee on each capture (address(0) if no fee)
+        address payer; // buyer — funds are pulled from this address
+        address payee; // merchant — calls capture, void, refund
+        address token; // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
+        uint120 maxAmount; // upper bound on what can be authorized
+        uint48 authorizationExpiry; // cutoff for capture; release opens after
+        uint48 refundExpiry; // cutoff for refund
+        uint16 feeBps; // fee in basis points (0–10000)
+        address feeReceiver; // recipient of fee on each capture (address(0) if no fee)
     }
 
     /// @notice Mutable payment state, packed in one storage slot (248 bits).
     struct PaymentState {
-        bool    exists;            //   8 bits — set on first authorize/charge
-        uint120 capturableAmount;  // 120 bits — funds held in escrow
-        uint120 refundableAmount;  // 120 bits — funds with payee, still refundable
+        bool exists; //   8 bits — set on first authorize/charge
+        uint120 capturableAmount; // 120 bits — funds held in escrow
+        uint120 refundableAmount; // 120 bits — funds with payee, still refundable
     }
 
     mapping(bytes32 => PaymentState) internal _state;
@@ -138,18 +138,10 @@ contract RAIL0 {
     event PaymentCharged(
         bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment, uint256 amount
     );
-    event PaymentCaptured(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
-    );
-    event PaymentVoided(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
-    );
-    event PaymentReleased(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
-    );
-    event PaymentRefunded(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount
-    );
+    event PaymentCaptured(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+    event PaymentVoided(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+    event PaymentReleased(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+    event PaymentRefunded(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
 
     // ================================================================
     //  Errors
@@ -185,20 +177,17 @@ contract RAIL0 {
     /// @notice Authorize funds: pull `amount` from buyer into escrow.
     /// @dev    The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's
     ///         domain with `from = p.payer`, `to = address(this)`, `value = amount`,
-    ///         and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
-    ///         The nonce derivation binds the signature to specific Payment terms — a
-    ///         merchant cannot substitute different terms and reuse the signature.
+    ///         `validAfter = 0`, `validBefore = p.authorizationExpiry`, and
+    ///         `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
+    ///         The submission window equals the escrow window — once `authorizationExpiry`
+    ///         passes, the sig is dead at the token and the on-chain payment can no longer
+    ///         be opened. The nonce derivation binds the signature to specific Payment
+    ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Anyone may submit this transaction; the submitter pays gas.
-    function authorize(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint256 validAfter,
-        uint256 validBefore,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external nonReentrant {
+    function authorize(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+        external
+        nonReentrant
+    {
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p, amount);
 
@@ -206,45 +195,39 @@ contract RAIL0 {
         _configHash[paymentId] = configHash;
         // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
         uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({
-            exists: true,
-            capturableAmount: amount120,
-            refundableAmount: 0
-        });
+        _state[paymentId] = PaymentState({ exists: true, capturableAmount: amount120, refundableAmount: 0 });
 
         // EIP-3009 pulls funds — token verifies the buyer's signature. Tampering with
         // any Payment field changes the configHash, which changes the nonce, which
         // makes the recovered signer differ from `p.payer`, causing the token to revert.
-        IEIP3009(p.token).transferWithAuthorization(
-            p.payer,
-            address(this),
-            amount,
-            validAfter,
-            validBefore,
-            _authorizeNonce(paymentId, configHash),
-            v,
-            r,
-            s
-        );
+        IEIP3009(p.token)
+            .transferWithAuthorization(
+                p.payer,
+                address(this),
+                amount,
+                0,
+                p.authorizationExpiry,
+                _authorizeNonce(paymentId, configHash),
+                v,
+                r,
+                s
+            );
 
         emit PaymentAuthorized(paymentId, p.payer, p.payee, p, amount);
     }
 
     /// @notice One-shot: authorize and immediately capture (no hold).
-    /// @dev    Same EIP-3009 pattern as `authorize`, but the nonce uses
-    ///         `_CHARGE_NONCE_PREFIX` so an authorize-signature can't be repurposed
-    ///         for charge (and vice versa). After the buyer's funds reach RAIL0, the
-    ///         contract immediately distributes to `payee` + `feeReceiver`.
-    function charge(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint256 validAfter,
-        uint256 validBefore,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external nonReentrant {
+    /// @dev    Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and
+    ///         `validBefore = p.authorizationExpiry` baked into the buyer's signed
+    ///         payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an authorize-
+    ///         signature can't be repurposed for charge (and vice versa). Here
+    ///         `authorizationExpiry` is the submission deadline only — there is no
+    ///         escrow window because the contract immediately distributes the buyer's
+    ///         funds to `payee` + `feeReceiver`.
+    function charge(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+        external
+        nonReentrant
+    {
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p, amount);
 
@@ -252,23 +235,12 @@ contract RAIL0 {
         _configHash[paymentId] = configHash;
         // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
         uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({
-            exists: true,
-            capturableAmount: 0,
-            refundableAmount: amount120
-        });
+        _state[paymentId] = PaymentState({ exists: true, capturableAmount: 0, refundableAmount: amount120 });
 
-        IEIP3009(p.token).transferWithAuthorization(
-            p.payer,
-            address(this),
-            amount,
-            validAfter,
-            validBefore,
-            _chargeNonce(paymentId, configHash),
-            v,
-            r,
-            s
-        );
+        IEIP3009(p.token)
+            .transferWithAuthorization(
+                p.payer, address(this), amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
+            );
 
         _distribute(p, amount);
 
@@ -407,6 +379,7 @@ contract RAIL0 {
         if (p.maxAmount > type(uint120).max) revert AmountTooLarge();
         if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
+        if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.feeBps > MAX_FEE_BPS) revert FeeBpsTooHigh();
         if (p.feeBps > 0) {
             if (p.feeReceiver == address(0)) revert ZeroFeeReceiver();
@@ -418,11 +391,7 @@ contract RAIL0 {
         if (!_accepted[p.token]) revert TokenNotAccepted();
     }
 
-    function _loadAndVerify(bytes32 paymentId, Payment calldata p)
-        internal
-        view
-        returns (PaymentState memory s)
-    {
+    function _loadAndVerify(bytes32 paymentId, Payment calldata p) internal view returns (PaymentState memory s) {
         s = _state[paymentId];
         if (!s.exists) revert PaymentNotFound();
         if (_configHash[paymentId] != _hash(p)) revert PaymentMismatch();
@@ -470,9 +439,7 @@ contract RAIL0 {
     }
 
     function _buildDomainSeparator() private view returns (bytes32) {
-        return keccak256(
-            abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this))
-        );
+        return keccak256(abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)));
     }
 
     // ================================================================
@@ -482,16 +449,14 @@ contract RAIL0 {
     /// @dev Calls `transfer` on `token` and reverts on failure. Accepts both bool-returning
     ///      and non-returning ERC-20 implementations.
     function _safeTransfer(address token, address to, uint256 amount) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeCall(IERC20.transfer, (to, amount)));
+        (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 
     /// @dev Calls `transferFrom` on `token` and reverts on failure. Accepts both
     ///      bool-returning and non-returning ERC-20 implementations.
     function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeCall(IERC20.transferFrom, (from, to, amount)));
+        (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transferFrom, (from, to, amount)));
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 }
