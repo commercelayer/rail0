@@ -127,7 +127,7 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 | `maxAmount`            | `uint120` | Upper bound on the amount the buyer can authorize.               |
 | `authorizationExpiry`  | `uint48`  | Cutoff for `capture`; `release` opens after this timestamp.      |
 | `refundExpiry`         | `uint48`  | Cutoff for `refund`.                                             |
-| `feeBps`               | `uint16`  | Fee in basis points (0–10000) taken on each capture.             |
+| `feeBps`               | `uint16`  | Fee in bps (0–10000), taken on `capture` and `charge`.           |
 | `feeReceiver`          | `address` | Recipient of the fee. Must be non-zero and not equal to either party when `feeBps > 0`. |
 
 ### State model
@@ -154,11 +154,11 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="5", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="6", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
-```
+```solidity
 authorizeNonce = keccak256(keccak256("RAIL0.AUTHORIZE"), paymentId, configHash)
 chargeNonce    = keccak256(keccak256("RAIL0.CHARGE"),    paymentId, configHash)
 ```
@@ -169,7 +169,7 @@ Distinct prefixes ensure an authorize-signature can't be reused for charge — t
 
 The domain separator is cached at construction and rebuilt automatically if `block.chainid` changes (chain-fork safety). Helpers exposed to off-chain signers:
 
-- `DOMAIN_SEPARATOR()` — current EIP-712 domain separator (used only for `Payment` hashing; the buyer signs over the *token's* domain).
+- `DOMAIN_SEPARATOR()` — current EIP-712 domain separator (used only for `Payment` hashing; the buyer signs over the _token's_ domain).
 - `hashPayment(p)` — Payment digest (also stored on-chain as configHash).
 - `authorizeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `authorize`.
 - `chargeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `charge`.
@@ -209,7 +209,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | `InvalidAmount`             | `amount == 0` or `amount > p.maxAmount`.                           |
 | `AmountTooLarge`            | `p.maxAmount > type(uint120).max`.                                 |
 | `InvalidExpiries`           | Expiries are zero or out of order.                                 |
-| `AuthorizationExpired`      | `block.timestamp >= p.authorizationExpiry` at capture.             |
+| `AuthorizationExpired`      | `timestamp >= authorizationExpiry`; `authorize`/`charge`/`capture`.|
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
 | `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
 | `FeeBpsTooHigh`             | `p.feeBps > 10000`.                                                |

@@ -113,7 +113,7 @@ contract RAIL0 {
         uint48 authorizationExpiry; // cutoff for capture; release opens after
         uint48 refundExpiry; // cutoff for refund
         uint16 feeBps; // fee in basis points (0–10000)
-        address feeReceiver; // recipient of fee on each capture (address(0) if no fee)
+        address feeReceiver; // recipient of fee on each capture and charge (address(0) if no fee)
     }
 
     /// @notice Mutable payment state, packed in one storage slot (248 bits).
