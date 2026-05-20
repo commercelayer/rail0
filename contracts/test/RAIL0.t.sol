@@ -210,7 +210,7 @@ contract RAIL0Test is Test {
             payer: payer,
             payee: payee,
             token: address(token),
-            maxAmount: 1000e6,
+            amount: 100e6,
             authorizationExpiry: authorizationExpiry,
             refundExpiry: refundExpiry,
             feeBps: 0,
@@ -244,22 +244,22 @@ contract RAIL0Test is Test {
     }
 
     /// Submit `authorize` as the merchant on behalf of the payer.
-    function _authorize(bytes32 paymentId, RAIL0.Payment memory p, uint256 amount) internal {
+    function _authorize(bytes32 paymentId, RAIL0.Payment memory p) internal {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(paymentId, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), amount, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
-        rail0.authorize(paymentId, p, amount, v, r, s);
+        rail0.authorize(paymentId, p, v, r, s);
     }
 
-    function _charge(bytes32 paymentId, RAIL0.Payment memory p, uint256 amount) internal {
+    function _charge(bytes32 paymentId, RAIL0.Payment memory p) internal {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(paymentId, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), amount, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
-        rail0.charge(paymentId, p, amount, v, r, s);
+        rail0.charge(paymentId, p, v, r, s);
     }
 
     // ============================================================
@@ -268,7 +268,7 @@ contract RAIL0Test is Test {
 
     function test_Authorize_Success() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
         assertTrue(s.exists);
@@ -284,10 +284,10 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.prank(makeAddr("random-relayer"));
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
 
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
     }
@@ -298,24 +298,11 @@ contract RAIL0Test is Test {
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         // Sign with payee key instead of payer
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         // Token reverts inside transferWithAuthorization on bad sig — bubbles through RAIL0.
         vm.expectRevert();
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
-    }
-
-    function test_Authorize_RevertsOnTamperedAmount() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
-        // Buyer signed for 100e6
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
-
-        // Merchant tries to submit with 200e6 — token's signed value won't match
-        vm.expectRevert();
-        rail0.authorize(PAYMENT_ID, p, 200e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Authorize_RevertsOnTamperedPayment() public {
@@ -324,14 +311,14 @@ contract RAIL0Test is Test {
         bytes32 signedHash = rail0.hashPayment(signed);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, signedHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
 
         // Submit with tampered Payment — the contract will derive a different nonce
         RAIL0.Payment memory tampered = _payment();
-        tampered.maxAmount = 9999e6;
+        tampered.amount = 200e6;
 
         vm.expectRevert();
-        rail0.authorize(PAYMENT_ID, tampered, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, tampered, v, r, s);
     }
 
     function test_Authorize_RevertsAfterAuthorizationExpiry() public {
@@ -339,11 +326,11 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.AuthorizationExpired.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Authorize_ChargeNonceDoesNotWorkForAuthorize() public {
@@ -352,45 +339,35 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 chargeNonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, chargeNonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, chargeNonce);
 
         vm.expectRevert();
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Authorize_RevertsIfPaymentIdReused() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Authorize_RevertsIfAmountZero() public {
         RAIL0.Payment memory p = _payment();
+        p.amount = 0;
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.InvalidAmount.selector);
-        rail0.authorize(PAYMENT_ID, p, 0, v, r, s);
-    }
-
-    function test_Authorize_RevertsIfAmountExceedsMax() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 1001e6, 0, authorizationExpiry, nonce);
-
-        vm.expectRevert(RAIL0.InvalidAmount.selector);
-        rail0.authorize(PAYMENT_ID, p, 1001e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Authorize_EmitsEvent() public {
@@ -398,11 +375,11 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
-        emit RAIL0.PaymentAuthorized(PAYMENT_ID, payer, payee, p, 100e6);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        emit RAIL0.PaymentAuthorized(PAYMENT_ID, payer, payee, p);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
@@ -411,7 +388,7 @@ contract RAIL0Test is Test {
 
     function test_Charge_Success() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
         assertEq(s.capturableAmount, 0);
@@ -422,7 +399,7 @@ contract RAIL0Test is Test {
 
     function test_Charge_WithFee_Distributes() public {
         RAIL0.Payment memory p = _paymentWithFee();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
         assertEq(token.balanceOf(feeReceiver), 2.5e6);
         assertEq(token.balanceOf(payee), 97.5e6);
     }
@@ -430,7 +407,7 @@ contract RAIL0Test is Test {
     function test_Charge_FullFee_ZeroPayee() public {
         RAIL0.Payment memory p = _paymentWithFee();
         p.feeBps = 10_000;
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
         assertEq(token.balanceOf(feeReceiver), 100e6);
         assertEq(token.balanceOf(payee), 0);
     }
@@ -440,10 +417,10 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 authNonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, authNonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, authNonce);
 
         vm.expectRevert();
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Charge_AnyoneCanSubmit() public {
@@ -451,10 +428,10 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.prank(makeAddr("random-relayer"));
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
 
         assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 100e6);
     }
@@ -464,21 +441,10 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert();
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
-    }
-
-    function test_Charge_RevertsOnTamperedAmount() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
-
-        vm.expectRevert();
-        rail0.charge(PAYMENT_ID, p, 200e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Charge_RevertsOnTamperedPayment() public {
@@ -486,13 +452,13 @@ contract RAIL0Test is Test {
         bytes32 signedHash = rail0.hashPayment(signed);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, signedHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
 
         RAIL0.Payment memory tampered = _payment();
-        tampered.maxAmount = 9999e6;
+        tampered.amount = 200e6;
 
         vm.expectRevert();
-        rail0.charge(PAYMENT_ID, tampered, 100e6, v, r, s);
+        rail0.charge(PAYMENT_ID, tampered, v, r, s);
     }
 
     function test_Charge_RevertsAfterAuthorizationExpiry() public {
@@ -500,46 +466,36 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.AuthorizationExpired.selector);
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Charge_RevertsIfPaymentIdReused() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Charge_RevertsIfAmountZero() public {
         RAIL0.Payment memory p = _payment();
+        p.amount = 0;
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.InvalidAmount.selector);
-        rail0.charge(PAYMENT_ID, p, 0, v, r, s);
-    }
-
-    function test_Charge_RevertsIfAmountExceedsMax() public {
-        RAIL0.Payment memory p = _payment();
-        bytes32 configHash = rail0.hashPayment(p);
-        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 1001e6, 0, authorizationExpiry, nonce);
-
-        vm.expectRevert(RAIL0.InvalidAmount.selector);
-        rail0.charge(PAYMENT_ID, p, 1001e6, v, r, s);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Charge_EmitsEvent() public {
@@ -547,11 +503,11 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
-        emit RAIL0.PaymentCharged(PAYMENT_ID, payer, payee, p, 100e6);
-        rail0.charge(PAYMENT_ID, p, 100e6, v, r, s);
+        emit RAIL0.PaymentCharged(PAYMENT_ID, payer, payee, p);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
@@ -560,7 +516,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_Success() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 100e6);
@@ -573,7 +529,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_Partial_Multiple() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.startPrank(payee);
         rail0.capture(PAYMENT_ID, p, 30e6);
@@ -589,7 +545,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_RevertsIfNotPayee() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.expectRevert(RAIL0.NotPayee.selector);
         rail0.capture(PAYMENT_ID, p, 100e6);
@@ -597,7 +553,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_RevertsAtAuthExpiry() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.warp(authorizationExpiry);
         vm.prank(payee);
@@ -607,7 +563,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_RevertsIfAmountTooLarge() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidCaptureAmount.selector);
@@ -616,7 +572,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_RevertsIfAmountZero() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidCaptureAmount.selector);
@@ -625,7 +581,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_WithFee_Distributes() public {
         RAIL0.Payment memory p = _paymentWithFee();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 100e6);
@@ -649,7 +605,8 @@ contract RAIL0Test is Test {
     /// @dev feeBps=250 (2.5%), amount=39 → fee=(39*250)/10000=0. Payee gets full 39.
     function test_Capture_FeeRoundsDownDustToZero() public {
         RAIL0.Payment memory p = _paymentWithFee(); // feeBps=250
-        _authorize(PAYMENT_ID, p, 39);
+        p.amount = 39;
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 39);
@@ -662,7 +619,8 @@ contract RAIL0Test is Test {
     ///      Payee gets 390, fee receiver gets 9. Conservation: 9 + 390 == 399.
     function test_Capture_FeeRoundsDownTowardsPayee() public {
         RAIL0.Payment memory p = _paymentWithFee();
-        _authorize(PAYMENT_ID, p, 399);
+        p.amount = 399;
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 399);
@@ -689,7 +647,7 @@ contract RAIL0Test is Test {
         bytes32 paymentId = keccak256(abi.encodePacked("conservation", salt));
 
         RAIL0.Payment memory p = _payment();
-        p.maxAmount = amount;
+        p.amount = amount;
         p.feeBps = bps;
         p.feeReceiver = bps == 0 ? address(0) : feeReceiver;
 
@@ -699,7 +657,7 @@ contract RAIL0Test is Test {
         uint256 payeeBefore = token.balanceOf(payee);
         uint256 feeRcvBefore = token.balanceOf(feeReceiver);
 
-        _charge(paymentId, p, amount);
+        _charge(paymentId, p);
 
         uint256 paidToPayee = token.balanceOf(payee) - payeeBefore;
         uint256 paidToFee = token.balanceOf(feeReceiver) - feeRcvBefore;
@@ -710,17 +668,17 @@ contract RAIL0Test is Test {
 
     /// @dev Stress the multiplication: amount near uint120.max × max feeBps must not overflow
     ///      and must distribute correctly. uint120.max ≈ 1.3e36; × 9999 ≈ 1.3e40, far below 2^256.
-    function test_Capture_FeeMath_NoOverflowAtMaxAmount() public {
+    function test_Capture_FeeMath_NoOverflowAtUint120Max() public {
         uint120 huge = type(uint120).max;
 
         RAIL0.Payment memory p = _payment();
-        p.maxAmount = huge;
+        p.amount = huge;
         p.feeBps = 9_999;
         p.feeReceiver = feeReceiver;
 
         token.mint(payer, huge);
 
-        _charge(PAYMENT_ID, p, huge);
+        _charge(PAYMENT_ID, p);
 
         uint256 expectedFee = (uint256(huge) * 9_999) / 10_000;
         assertEq(token.balanceOf(feeReceiver), expectedFee);
@@ -737,8 +695,9 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 100; // 1%
         p.feeReceiver = feeReceiver;
+        p.amount = 100;
 
-        _authorize(PAYMENT_ID, p, 100);
+        _authorize(PAYMENT_ID, p);
 
         vm.startPrank(payee);
         rail0.capture(PAYMENT_ID, p, 50);
@@ -754,7 +713,8 @@ contract RAIL0Test is Test {
     ///      identically when invoked from the charge path.
     function test_Charge_FeeRoundsDownDustToZero() public {
         RAIL0.Payment memory p = _paymentWithFee();
-        _charge(PAYMENT_ID, p, 39);
+        p.amount = 39;
+        _charge(PAYMENT_ID, p);
 
         assertEq(token.balanceOf(feeReceiver), 0);
         assertEq(token.balanceOf(payee), 39);
@@ -766,7 +726,7 @@ contract RAIL0Test is Test {
 
     function test_Void_Success() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         uint256 balBefore = token.balanceOf(payer);
         vm.prank(payee);
@@ -778,7 +738,7 @@ contract RAIL0Test is Test {
 
     function test_Void_RevertsIfNothingToVoid() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6); // capturable = 0
+        _charge(PAYMENT_ID, p); // capturable = 0
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.NothingToVoid.selector);
@@ -787,7 +747,7 @@ contract RAIL0Test is Test {
 
     function test_Release_Success() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.warp(authorizationExpiry);
         uint256 balBefore = token.balanceOf(payer);
@@ -800,7 +760,7 @@ contract RAIL0Test is Test {
 
     function test_Release_RevertsBeforeAuthExpiry() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.expectRevert(RAIL0.AuthorizationNotExpired.selector);
         rail0.release(PAYMENT_ID, p);
@@ -808,7 +768,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_Success() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         uint256 balBefore = token.balanceOf(payer);
         vm.prank(payee);
@@ -820,7 +780,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_Partial_Multiple() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.startPrank(payee);
         rail0.refund(PAYMENT_ID, p, 30e6);
@@ -832,7 +792,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsAtRefundExpiry() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.warp(refundExpiry);
         vm.prank(payee);
@@ -842,7 +802,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsIfNoStandingApproval() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.prank(payee);
         token.approve(address(rail0), 0);
@@ -865,10 +825,10 @@ contract RAIL0Test is Test {
 
     function test_Capture_RevertsIfPaymentMismatch() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         // Tamper with any field — capture should reject
-        p.maxAmount = 9999e6;
+        p.amount = 9999e6;
         vm.prank(payee);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.capture(PAYMENT_ID, p, 50e6);
@@ -876,7 +836,7 @@ contract RAIL0Test is Test {
 
     function test_Capture_LeavesRemainingCapturable() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 30e6);
@@ -888,7 +848,7 @@ contract RAIL0Test is Test {
 
     function test_Void_RevertsIfNotPayee() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.expectRevert(RAIL0.NotPayee.selector);
         rail0.void(PAYMENT_ID, p);
@@ -903,9 +863,9 @@ contract RAIL0Test is Test {
 
     function test_Void_RevertsIfPaymentMismatch() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
-        p.maxAmount = 9999e6;
+        p.amount = 9999e6;
         vm.prank(payee);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.void(PAYMENT_ID, p);
@@ -913,7 +873,7 @@ contract RAIL0Test is Test {
 
     function test_Void_AfterPartialCapture_VoidsRemaining() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 30e6);
@@ -931,7 +891,7 @@ contract RAIL0Test is Test {
 
     function test_Release_AnyoneCanCall() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.warp(authorizationExpiry);
         // Submit from a totally unrelated address
@@ -943,7 +903,7 @@ contract RAIL0Test is Test {
 
     function test_Release_RevertsIfNothingToRelease() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         // Void first → capturable = 0
         vm.prank(payee);
@@ -963,9 +923,9 @@ contract RAIL0Test is Test {
 
     function test_Release_RevertsIfPaymentMismatch() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
-        p.maxAmount = 9999e6;
+        p.amount = 9999e6;
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.release(PAYMENT_ID, p);
@@ -974,7 +934,7 @@ contract RAIL0Test is Test {
     function test_Release_AfterCharge_RevertsNothingToRelease() public {
         // charge sets capturable = 0; release after authorizationExpiry should revert
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.NothingToRelease.selector);
@@ -983,7 +943,7 @@ contract RAIL0Test is Test {
 
     function test_Release_AfterFullCapture_RevertsNothingToRelease() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 100e6);
@@ -997,7 +957,7 @@ contract RAIL0Test is Test {
         // Boundary: block.timestamp == authorizationExpiry should succeed
         // (the check is `block.timestamp < authorizationExpiry` revert).
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.warp(authorizationExpiry);
         rail0.release(PAYMENT_ID, p);
@@ -1006,7 +966,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsIfNotPayee() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.expectRevert(RAIL0.NotPayee.selector);
         rail0.refund(PAYMENT_ID, p, 50e6);
@@ -1014,7 +974,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsIfAmountZero() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
@@ -1023,7 +983,7 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsIfAmountExceedsRefundable() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
@@ -1039,9 +999,9 @@ contract RAIL0Test is Test {
 
     function test_Refund_RevertsIfPaymentMismatch() public {
         RAIL0.Payment memory p = _payment();
-        _charge(PAYMENT_ID, p, 100e6);
+        _charge(PAYMENT_ID, p);
 
-        p.maxAmount = 9999e6;
+        p.amount = 9999e6;
         vm.prank(payee);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.refund(PAYMENT_ID, p, 50e6);
@@ -1050,7 +1010,7 @@ contract RAIL0Test is Test {
     function test_Refund_AfterCapture_Workflow() public {
         // authorize → capture → refund: refund pulls from merchant wallet
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 100e6);
@@ -1117,24 +1077,24 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, other, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, other, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.TokenNotAccepted.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
     //  Validation
     // ============================================================
 
-    function _signForAuthorize(RAIL0.Payment memory p, uint256 amount)
+    function _signForAuthorize(RAIL0.Payment memory p)
         internal
         view
         returns (uint8 v, bytes32 r, bytes32 s)
     {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
-        return _sign3009(payerKey, token, payer, address(rail0), amount, 0, p.authorizationExpiry, nonce);
+        return _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
     }
 
     function test_Validation_RejectsBadExpiriesOrder() public {
@@ -1142,77 +1102,77 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory p = _payment();
         p.authorizationExpiry = uint48(block.timestamp + 30 days);
         p.refundExpiry = uint48(block.timestamp + 7 days);
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.InvalidExpiries.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsZeroAuthorizationExpiry() public {
         RAIL0.Payment memory p = _payment();
         p.authorizationExpiry = 0;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.InvalidExpiries.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsHighFeeBps() public {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 10_001;
         p.feeReceiver = feeReceiver;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.FeeBpsTooHigh.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsZeroFeeReceiverWhenFeeBpsSet() public {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 100;
         p.feeReceiver = address(0);
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.ZeroFeeReceiver.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsFeeReceiverEqualsPayer() public {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 100;
         p.feeReceiver = payer;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.FeeReceiverIsParty.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsFeeReceiverEqualsPayee() public {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 100;
         p.feeReceiver = payee;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.FeeReceiverIsParty.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsZeroPayer() public {
         RAIL0.Payment memory p = _payment();
         p.payer = address(0);
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.ZeroAddress.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsZeroPayee() public {
         RAIL0.Payment memory p = _payment();
         p.payee = address(0);
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.expectRevert(RAIL0.ZeroAddress.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_RejectsZeroToken() public {
@@ -1222,10 +1182,10 @@ contract RAIL0Test is Test {
         // Build the digest manually with the original token, but submit with token=0.
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, rail0.hashPayment(p));
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.ZeroAddress.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     function test_Validation_AcceptsExpiriesEqual() public {
@@ -1235,9 +1195,9 @@ contract RAIL0Test is Test {
         uint48 t = uint48(block.timestamp + 1 hours);
         p.authorizationExpiry = t;
         p.refundExpiry = t;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
     }
 
@@ -1246,19 +1206,10 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory p = _payment();
         p.feeBps = 10_000;
         p.feeReceiver = feeReceiver;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, 100e6);
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
-    }
-
-    function test_Validation_AcceptsAmountEqualMax() public {
-        // Boundary: amount == maxAmount should succeed (uses `<=`).
-        RAIL0.Payment memory p = _payment();
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p, p.maxAmount);
-
-        rail0.authorize(PAYMENT_ID, p, p.maxAmount, v, r, s);
-        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, p.maxAmount);
     }
 
     // ============================================================
@@ -1270,7 +1221,8 @@ contract RAIL0Test is Test {
         // amount=1, feeBps=100 (1%) → fee = 1*100/10000 = 0 → all goes to payee.
         RAIL0.Payment memory p = _paymentWithFee(); // feeBps = 250
         p.feeBps = 100;
-        _charge(PAYMENT_ID, p, 1);
+        p.amount = 1;
+        _charge(PAYMENT_ID, p);
 
         assertEq(token.balanceOf(feeReceiver), 0);
         assertEq(token.balanceOf(payee), 1);
@@ -1282,7 +1234,8 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory p = _paymentWithFee();
         p.feeReceiver = feeReceiver; // address that hasn't received tokens yet
         p.feeBps = 1; // 0.01%
-        _charge(PAYMENT_ID, p, 99); // 99*1/10000 = 0 (rounds down)
+        p.amount = 99; // 99*1/10000 = 0 (rounds down)
+        _charge(PAYMENT_ID, p);
 
         assertEq(token.balanceOf(feeReceiver), 0);
         assertEq(token.balanceOf(payee), 99);
@@ -1310,7 +1263,7 @@ contract RAIL0Test is Test {
         bytes32 baseHash = rail0.hashPayment(p1);
 
         RAIL0.Payment memory p2 = _payment();
-        p2.maxAmount = p1.maxAmount + 1;
+        p2.amount = p1.amount + 1;
         assertTrue(rail0.hashPayment(p2) != baseHash);
 
         RAIL0.Payment memory p3 = _payment();
@@ -1349,16 +1302,16 @@ contract RAIL0Test is Test {
         // Even if a buyer signs identical args, the second authorize hits
         // PaymentAlreadyExists before reaching the token's nonce check.
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
         // Attempt to replay
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 100e6, 0, authorizationExpiry, nonce);
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
-        rail0.authorize(PAYMENT_ID, p, 100e6, v, r, s);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
@@ -1367,10 +1320,10 @@ contract RAIL0Test is Test {
 
     function test_PaymentMismatch_Reverts() public {
         RAIL0.Payment memory p = _payment();
-        _authorize(PAYMENT_ID, p, 100e6);
+        _authorize(PAYMENT_ID, p);
 
-        // Tamper with maxAmount; capture should fail hash check
-        p.maxAmount = 999e6;
+        // Tamper with amount; capture should fail hash check
+        p.amount = 999e6;
         vm.prank(payee);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.capture(PAYMENT_ID, p, 50e6);
@@ -1420,8 +1373,8 @@ contract RAIL0Test is Test {
         bytes32 cfg = r.hashPayment(p);
         bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
         (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, badTransfer, payer, address(r), 100e6, 0, authorizationExpiry, nonce);
-        r.authorize(PAYMENT_ID, p, 100e6, v, rr, ss);
+            _sign3009(payerKey, badTransfer, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        r.authorize(PAYMENT_ID, p, v, rr, ss);
 
         // Now void → _safeTransfer(token, payer, amount) → token.transfer returns false → revert.
         vm.prank(payee);
@@ -1445,8 +1398,8 @@ contract RAIL0Test is Test {
         bytes32 cfg = r.hashPayment(p);
         bytes32 nonce = r.chargeNonce(PAYMENT_ID, cfg);
         (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, badTF, payer, address(r), 100e6, 0, authorizationExpiry, nonce);
-        r.charge(PAYMENT_ID, p, 100e6, v, rr, ss);
+            _sign3009(payerKey, badTF, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        r.charge(PAYMENT_ID, p, v, rr, ss);
 
         vm.prank(payee);
         badTF.approve(address(r), type(uint256).max);
@@ -1483,8 +1436,8 @@ contract RAIL0Test is Test {
         bytes32 cfg = r.hashPayment(p);
         bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
         (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, bToken, payer, address(r), 100e6, 0, authorizationExpiry, nonce);
-        r.authorize(PAYMENT_ID, p, 100e6, v, rr, ss);
+            _sign3009(payerKey, bToken, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        r.authorize(PAYMENT_ID, p, v, rr, ss);
     }
 
     function test_Capture_RevertsIfFeeReceiverBlacklisted() public {
@@ -1535,9 +1488,6 @@ contract RAIL0Test is Test {
             r.authorize.selector,
             keccak256("attack-pid"),
             p,
-            uint256(50e6),
-            uint256(0),
-            FAR_FUTURE,
             uint8(27),
             bytes32(0),
             bytes32(0)
@@ -1547,7 +1497,7 @@ contract RAIL0Test is Test {
         // The bogus signature args don't matter — the reentry trips the guard before
         // the token would verify them. Outer authorize uses the same bogus sig because
         // MockReentrant ignores the auth args entirely (it just runs the reentry).
-        r.authorize(PAYMENT_ID, p, 100e6, uint8(27), bytes32(0), bytes32(0));
+        r.authorize(PAYMENT_ID, p, uint8(27), bytes32(0), bytes32(0));
 
         assertTrue(evil.reenterAttempted(), "reentrant token did not actually attempt reentry");
         assertFalse(evil.reenterSucceeded(), "reentrancy guard failed to block inner call");
@@ -1559,8 +1509,9 @@ contract RAIL0Test is Test {
 
     function test_E2E_AuthorizeCaptureRefund_WithFee() public {
         RAIL0.Payment memory p = _paymentWithFee();
+        p.amount = 200e6;
 
-        _authorize(PAYMENT_ID, p, 200e6);
+        _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 200e6);
