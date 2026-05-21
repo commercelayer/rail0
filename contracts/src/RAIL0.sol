@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    uint256 public constant VERSION = 6;
+    string public constant VERSION = "7";
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -28,7 +28,7 @@ contract RAIL0 {
 
     /// @dev EIP-712 typehash for the Payment struct. Field order MUST match the struct layout.
     bytes32 internal constant _PAYMENT_TYPEHASH = keccak256(
-        "Payment(address payer,address payee,address token,uint120 maxAmount,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
+        "Payment(address payer,address payee,address token,uint120 amount,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
     );
 
     /// @dev Prefixes used to derive EIP-3009 nonces. Including a per-operation prefix
@@ -37,7 +37,7 @@ contract RAIL0 {
     bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
-    bytes32 internal constant _VERSION_HASH = keccak256(bytes("6"));
+    bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
 
     /// @dev Reentrancy lock states.
     uint256 private constant _NOT_ENTERED = 1;
@@ -109,7 +109,7 @@ contract RAIL0 {
         address payer; // buyer — funds are pulled from this address
         address payee; // merchant — calls capture, void, refund
         address token; // EIP-3009-capable ERC-20 (must be in this deployment's allowlist)
-        uint120 maxAmount; // upper bound on what can be authorized
+        uint120 amount; // exact amount the payer commits to pay
         uint48 authorizationExpiry; // cutoff for capture; release opens after
         uint48 refundExpiry; // cutoff for refund
         uint16 feeBps; // fee in basis points (0–10000)
@@ -132,12 +132,8 @@ contract RAIL0 {
 
     event TokenAccepted(address indexed token);
 
-    event PaymentAuthorized(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment, uint256 amount
-    );
-    event PaymentCharged(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment, uint256 amount
-    );
+    event PaymentAuthorized(bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
+    event PaymentCharged(bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
     event PaymentCaptured(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
     event PaymentVoided(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
     event PaymentReleased(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
@@ -152,7 +148,6 @@ contract RAIL0 {
     error PaymentNotFound();
     error PaymentMismatch();
     error InvalidAmount();
-    error AmountTooLarge();
     error InvalidExpiries();
     error AuthorizationExpired();
     error AuthorizationNotExpired();
@@ -174,9 +169,9 @@ contract RAIL0 {
     //  Buyer-initiated operations (EIP-3009 signed off-chain, anyone submits)
     // ================================================================
 
-    /// @notice Authorize funds: pull `amount` from buyer into escrow.
+    /// @notice Authorize funds: pull `p.amount` from buyer into escrow.
     /// @dev    The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's
-    ///         domain with `from = p.payer`, `to = address(this)`, `value = amount`,
+    ///         domain with `from = p.payer`, `to = address(this)`, `value = p.amount`,
     ///         `validAfter = 0`, `validBefore = p.authorizationExpiry`, and
     ///         `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
     ///         The submission window equals the escrow window — once `authorizationExpiry`
@@ -184,36 +179,26 @@ contract RAIL0 {
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Anyone may submit this transaction; the submitter pays gas.
-    function authorize(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+    function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
     {
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
-        _validatePayment(p, amount);
+        _validatePayment(p);
 
         bytes32 configHash = _hash(p);
         _configHash[paymentId] = configHash;
-        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
-        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({ exists: true, capturableAmount: amount120, refundableAmount: 0 });
+        _state[paymentId] = PaymentState({ exists: true, capturableAmount: p.amount, refundableAmount: 0 });
 
         // EIP-3009 pulls funds — token verifies the buyer's signature. Tampering with
         // any Payment field changes the configHash, which changes the nonce, which
         // makes the recovered signer differ from `p.payer`, causing the token to revert.
-        IEIP3009(p.token)
-            .transferWithAuthorization(
-                p.payer,
-                address(this),
-                amount,
-                0,
-                p.authorizationExpiry,
-                _authorizeNonce(paymentId, configHash),
-                v,
-                r,
-                s
-            );
+        IEIP3009(p.token).transferWithAuthorization(
+            p.payer, address(this), p.amount, 0, p.authorizationExpiry,
+            _authorizeNonce(paymentId, configHash), v, r, s
+        );
 
-        emit PaymentAuthorized(paymentId, p.payer, p.payee, p, amount);
+        emit PaymentAuthorized(paymentId, p.payer, p.payee, p);
     }
 
     /// @notice One-shot: authorize and immediately capture (no hold).
@@ -224,27 +209,25 @@ contract RAIL0 {
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately distributes the buyer's
     ///         funds to `payee` + `feeReceiver`.
-    function charge(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+    function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
     {
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
-        _validatePayment(p, amount);
+        _validatePayment(p);
 
         bytes32 configHash = _hash(p);
         _configHash[paymentId] = configHash;
-        // Safe cast: _validatePayment enforces amount <= maxAmount <= type(uint120).max.
-        uint120 amount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId] = PaymentState({ exists: true, capturableAmount: 0, refundableAmount: amount120 });
+        _state[paymentId] = PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount });
 
-        IEIP3009(p.token)
-            .transferWithAuthorization(
-                p.payer, address(this), amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
-            );
+        IEIP3009(p.token).transferWithAuthorization(
+            p.payer, address(this), p.amount, 0, p.authorizationExpiry,
+            _chargeNonce(paymentId, configHash), v, r, s
+        );
 
-        _distribute(p, amount);
+        _distribute(p, p.amount);
 
-        emit PaymentCharged(paymentId, p.payer, p.payee, p, amount);
+        emit PaymentCharged(paymentId, p.payer, p.payee, p);
     }
 
     /// @notice Release escrowed funds back to the buyer after authorizationExpiry.
@@ -276,7 +259,7 @@ contract RAIL0 {
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (amount == 0 || amount > s.capturableAmount) revert InvalidCaptureAmount();
 
-        // Safe cast: amount <= capturableAmount (uint120) checked above; sum <= maxAmount <= uint120.
+        // Safe cast: amount <= capturableAmount (uint120) checked above.
         uint120 captureAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
         _state[paymentId].capturableAmount = s.capturableAmount - captureAmount120;
         _state[paymentId].refundableAmount = s.refundableAmount + captureAmount120;
@@ -374,9 +357,8 @@ contract RAIL0 {
         return keccak256(abi.encode(_CHARGE_NONCE_PREFIX, paymentId, configHash));
     }
 
-    function _validatePayment(Payment calldata p, uint256 amount) internal view {
-        if (amount == 0 || amount > p.maxAmount) revert InvalidAmount();
-        if (p.maxAmount > type(uint120).max) revert AmountTooLarge();
+    function _validatePayment(Payment calldata p) internal view {
+        if (p.amount == 0) revert InvalidAmount();
         if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
@@ -421,7 +403,7 @@ contract RAIL0 {
                 p.payer,
                 p.payee,
                 p.token,
-                p.maxAmount,
+                p.amount,
                 p.authorizationExpiry,
                 p.refundExpiry,
                 p.feeBps,
