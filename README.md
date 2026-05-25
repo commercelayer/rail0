@@ -28,8 +28,8 @@ Currently targeted:
 
 | Chain | Network | Stablecoin(s) | _rail0_ address |
 |-------|---------|---------------|-----------------|
-| Arc | testnet | USDC, EURC | [`0xd71F...9D81`](https://testnet.arcscan.app/address/0xd71Fa3954c15158B2f80c438C7e46e94c30F9D81) |
-| Celo | Sepolia testnet | USDC, USDT | [`0x6187...e445`](https://celo-sepolia.blockscout.com/address/0x618794795850A9fbBd3B5AD88Abb8C638a8Ce445) |
+| Arc | testnet | USDC, EURC | [`0xcEA3...40B7`](https://testnet.arcscan.app/address/0xcEA3E28cb387929876F7b1c452460fF3F40C40B7) |
+| Celo | Sepolia testnet | USDC, USDT | [`0xd71F...9D81`](https://celo-sepolia.blockscout.com/address/0xd71Fa3954c15158B2f80c438C7e46e94c30F9D81) |
 | Plasma | testnet | USDT0 | _planned_ |
 | Tempo | — | TIP-20 (EIP-2612 only today) | _waiting on EIP-3009_ |
 
