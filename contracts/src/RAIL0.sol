@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "7";
+    string public constant VERSION = "8";
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -31,10 +31,14 @@ contract RAIL0 {
         "Payment(address payer,address payee,address token,uint120 amount,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
     );
 
-    /// @dev Prefixes used to derive EIP-3009 nonces. Including a per-operation prefix
-    ///      ensures an authorize signature can't be reused for charge (and vice versa).
+    /// @dev Prefixes used to derive EIP-3009 nonces. A per-operation prefix ensures
+    ///      signatures cannot be reused across operations.
+    ///      Refund nonces also encode the current refundableAmount so each partial
+    ///      refund has a unique, deterministic nonce tied to the payment's state at
+    ///      signing time — preventing replays and double-spending of the same position.
     bytes32 internal constant _AUTHORIZE_NONCE_PREFIX = keccak256("RAIL0.AUTHORIZE");
-    bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
+    bytes32 internal constant _CHARGE_NONCE_PREFIX    = keccak256("RAIL0.CHARGE");
+    bytes32 internal constant _REFUND_NONCE_PREFIX    = keccak256("RAIL0.REFUND");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
     bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
@@ -164,6 +168,7 @@ contract RAIL0 {
     error DuplicateToken();
     error TransferFailed();
     error Reentrancy();
+    error InvalidRefundNonce();
 
     // ================================================================
     //  Buyer-initiated operations (EIP-3009 signed off-chain, anyone submits)
@@ -284,22 +289,52 @@ contract RAIL0 {
     }
 
     /// @notice Refund a previously captured amount from the merchant's wallet.
-    /// @dev    Captured funds live in the payee's wallet, not in this contract. Refund
-    ///         pulls them back via `transferFrom`, so the payee MUST maintain an ERC-20
-    ///         allowance to this contract on `p.token` of at least `amount`. The merchant
-    ///         is the on-chain submitter here, so they can manage their own approval —
-    ///         no off-chain authorization signature is needed.
-    function refund(bytes32 paymentId, Payment calldata p, uint256 amount) external nonReentrant {
-        if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+    /// @dev    Uses EIP-3009 `receiveWithAuthorization` — the payee signs a
+    ///         `TransferWithAuthorization` digest off-chain; RAIL0 calls
+    ///         `receiveWithAuthorization` to pull funds from the payee directly into
+    ///         this contract, then immediately forwards them to the payer. No ERC-20
+    ///         allowance (`approve`) is needed.
+    ///
+    ///         Signature bindings:
+    ///           from        = p.payee
+    ///           to          = address(this)
+    ///           value       = amount
+    ///           validAfter  = 0
+    ///           validBefore = p.refundExpiry
+    ///           nonce       = refundNonce(paymentId, configHash, refundableAmount)
+    ///
+    ///         The nonce encodes the current `refundableAmount` so each partial refund
+    ///         has a unique, deterministic nonce — preventing replay and double-spending
+    ///         of the same refund position. Anyone may submit; funds always reach `p.payer`.
+    function refund(
+        bytes32 paymentId,
+        Payment calldata p,
+        uint256 amount,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant {
+        PaymentState memory st = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
-        if (amount == 0 || amount > s.refundableAmount) revert InvalidRefundAmount();
+        if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
 
         // Safe cast: amount <= refundableAmount (uint120) checked above.
         uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId].refundableAmount = s.refundableAmount - refundAmount120;
+        _state[paymentId].refundableAmount = st.refundableAmount - refundAmount120;
 
-        _safeTransferFrom(p.token, p.payee, p.payer, amount);
+        // Pull funds from payee using their EIP-3009 signature — no allowance needed.
+        // validBefore = p.refundExpiry ensures the signature is dead once the refund window closes.
+        IEIP3009(p.token).receiveWithAuthorization(
+            p.payee,
+            address(this),
+            amount,
+            0,                   // validAfter: available immediately
+            p.refundExpiry,      // validBefore: same as on-chain refund deadline
+            _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
+            v, r, s
+        );
+
+        _safeTransfer(p.token, p.payer, amount);
 
         emit PaymentRefunded(paymentId, p.payer, p.payee, amount);
     }
@@ -340,6 +375,21 @@ contract RAIL0 {
         return _chargeNonce(paymentId, configHash);
     }
 
+    /// @notice Computes the EIP-3009 nonce the payee must use when signing a
+    ///         `TransferWithAuthorization` for a `refund` call.
+    /// @param  paymentId    The payment identifier.
+    /// @param  configHash   Stored configuration hash (from `getConfigHash`).
+    /// @param  refundableAmount Current refundable balance (from `getPaymentState`).
+    ///         Including this value makes each partial-refund nonce unique and ties
+    ///         the signature to a specific payment state, preventing replay.
+    function refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _refundNonce(paymentId, configHash, refundableAmount);
+    }
+
     /// @notice Returns the EIP-712 domain separator for this contract on the current chain.
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
         return _domainSeparator();
@@ -355,6 +405,14 @@ contract RAIL0 {
 
     function _chargeNonce(bytes32 paymentId, bytes32 configHash) internal pure returns (bytes32) {
         return keccak256(abi.encode(_CHARGE_NONCE_PREFIX, paymentId, configHash));
+    }
+
+    function _refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount));
     }
 
     function _validatePayment(Payment calldata p) internal view {
