@@ -17,19 +17,22 @@ Payment rails should be open like the rest of the internet. That is the mission.
 
 ## Supported chains
 
-_rail0_ is built for **stablecoin-native chains with sub-second finality**, accepting tokens that implement **EIP-3009 (`transferWithAuthorization`)**. Concretely:
+_rail0_ has just two hard requirements — any chain and token that meet them can run it:
 
 - **EVM-compatible.** Solidity 0.8.27 must compile and execute on the chain.
-- **Stablecoin-native gas.** The chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.). Merchants pay gas in the same asset they're settling in — no second gas-token to manage.
-- **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times.
-- **EIP-3009-capable tokens.** Each accepted token must expose `transferWithAuthorization` so the buyer can authorize transfers off-chain.
+- **EIP-3009-capable tokens.** Each accepted token must expose `transferWithAuthorization` and `receiveWithAuthorization` so buyers and merchants can authorize transfers off-chain (used by `authorize`/`charge` and `refund` respectively).
+
+Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second finality**, and that's what the targeted deployments below optimize for — but neither is required by the contract:
+
+- **Stablecoin-native gas.** When the chain's native gas token is a regulated stablecoin (USDC, USDT, EURC, etc.), merchants pay gas in the same asset they're settling in — no second gas-token to manage. On other EVM chains _rail0_ still works; the merchant just pays gas in the chain's native token.
+- **Sub-second finality.** Online checkout doesn't tolerate multi-second confirmation times, so fast-finality chains give the best UX — but slower chains remain functionally supported.
 
 Currently targeted:
 
 | Chain | Network | Stablecoin(s) | _rail0_ address |
 |-------|---------|---------------|-----------------|
-| Arc | testnet | USDC, EURC | [`0xcEA3...40B7`](https://testnet.arcscan.app/address/0xcEA3E28cb387929876F7b1c452460fF3F40C40B7) |
-| Celo | Sepolia testnet | USDC, USDT | [`0xd71F...9D81`](https://celo-sepolia.blockscout.com/address/0xd71Fa3954c15158B2f80c438C7e46e94c30F9D81) |
+| Arc | testnet | USDC, EURC | [`0x7337...81d0`](https://testnet.arcscan.app/address/0x7337ce441e831ef2904b7B2f33507d655a4381d0) |
+| Celo | Sepolia testnet | USDC, USDT | [`0xcEA3...40B7`](https://celo-sepolia.blockscout.com/address/0xcEA3E28cb387929876F7b1c452460fF3F40C40B7) |
 | Plasma | testnet | USDT0 | _planned_ |
 | Tempo | — | TIP-20 (EIP-2612 only today) | _waiting on EIP-3009_ |
 
@@ -106,12 +109,21 @@ Buyer's safety net — return escrowed funds to the buyer if the merchant never 
 #### Refund
 
 ```solidity
-function refund(bytes32 paymentId, Payment calldata p, uint256 amount) external;
+function refund(
+    bytes32 paymentId,
+    Payment calldata p,
+    uint256 amount,
+    uint8 v,
+    bytes32 r,
+    bytes32 s
+) external;
 ```
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
 
-Only `p.payee` may call. Must run before `p.refundExpiry`, with `0 < amount ≤ refundableAmount`. State is updated: `refundableAmount -= amount`. Captured funds live in the merchant's wallet (not the contract), so `refund` calls `transferFrom(payee, payer, amount)` — **the merchant must keep an ERC-20 allowance to _rail0_ of at least `amount`**. The merchant is the on-chain submitter here, so they manage their own approval (typically `token.approve(rail0, max)` once at onboarding); no off-chain authorization signature is needed because they're broadcasting the tx anyway.
+Captured funds live in the merchant's wallet (not the contract), so `refund` pulls them back using the **same EIP-3009 pattern as `authorize`/`charge`** — symmetric, no allowance. The merchant (`p.payee`) signs an EIP-3009 `TransferWithAuthorization` over the token's domain off-chain with `from = p.payee`, `to = address(rail0)`, `value = amount`, `validAfter = 0`, `validBefore = p.refundExpiry`, and `nonce = keccak256(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount)`. **Anyone** can submit the transaction. The contract checks the payment exists, that `block.timestamp < p.refundExpiry` and `0 < amount ≤ refundableAmount`, decrements `refundableAmount -= amount`, then calls `token.receiveWithAuthorization(...)` to pull the funds from the merchant into _rail0_ and immediately forwards them to `p.payer` via `transfer`. No ERC-20 `approve` is ever needed.
+
+The refund nonce encodes the **current** `refundableAmount`, so each partial refund has a unique, deterministic nonce tied to the payment's state at signing time. _rail0_ always derives the nonce from the live `refundableAmount` when it calls the token, so a stale signature (made against an earlier `refundableAmount`) produces a different nonce than the one the merchant signed — the token's EIP-712 check recovers a signer that doesn't match `p.payee` and reverts. A replay of the same signed refund is rejected by the token's used-nonce tracking. Use `refundNonce(paymentId, configHash, refundableAmount)` to compute the value off-chain.
 
 ### The `Payment` struct
 
@@ -152,7 +164,7 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="7", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="8", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -171,13 +183,14 @@ The domain separator is cached at construction and rebuilt automatically if `blo
 - `hashPayment(p)` — Payment digest (also stored on-chain as configHash).
 - `authorizeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `authorize`.
 - `chargeNonce(paymentId, configHash)` — EIP-3009 nonce the buyer must use when signing for `charge`.
+- `refundNonce(paymentId, configHash, refundableAmount)` — EIP-3009 nonce the merchant must use when signing for `refund`. Encodes the current `refundableAmount`, so each partial refund has a distinct, replay-proof nonce.
 
 ### Allowance requirements
 
-_rail0_ does not custody anything outside the active escrow window. Token approvals work asymmetrically between the two parties:
+_rail0_ does not custody anything outside the active escrow window, and **no allowance grant ever happens for either party** — every wallet-to-contract movement uses an EIP-3009 signature:
 
-- **Buyer.** **No allowance grant ever happens.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to _rail0_ atomically based on the buyer's signature alone. The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
-- **Merchant.** Must approve _rail0_ once on the token before issuing refunds (`refund` calls `transferFrom(payee, payer, amount)`). The merchant is the on-chain submitter for refund anyway, so they manage their own approval — typically `token.approve(rail0, max)` once at onboarding. Not needed for `capture` / `void` / `release` (those distribute or move funds _rail0_ already holds).
+- **Buyer.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to _rail0_ atomically based on the buyer's signature alone (for `authorize` / `charge`). The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
+- **Merchant.** Captured funds live in the merchant's wallet; `refund` pulls them back via EIP-3009 `receiveWithAuthorization` against a signature the merchant produces off-chain. The merchant never grants an allowance either. Nothing is required for `capture` / `void` / `release` (those distribute or move funds _rail0_ already holds).
 
 ### Events
 
@@ -219,7 +232,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | `NothingToRelease`          | `release` called with `capturableAmount == 0`.                     |
 | `TokenNotAccepted`          | `p.token` is not in the deployment's allowlist.                    |
 | `DuplicateToken`            | Constructor `acceptedTokens` contained the same address twice.     |
-| `TransferFailed`            | A token `transfer` / `transferFrom` returned `false` or reverted.  |
+| `TransferFailed`            | A token `transfer` returned `false` or reverted.                   |
 | `Reentrancy`                | A nested call attempted to reenter a guarded entrypoint.           |
 
 ### Security model
@@ -228,9 +241,9 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **Curated trust boundary.** The deployer chooses which tokens _rail0_ will process. Including a hostile or weird ERC-20 in the allowlist is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s.
 - **Reentrancy guard.** All six entrypoints (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) are protected by a `nonReentrant` modifier. Any attempt to reenter from inside a token call reverts with `Reentrancy`.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers. Even if the reentrancy guard were bypassed (it can't be) the CEI ordering already prevents same-payment double-spending.
-- **SafeERC20-style transfers.** `_safeTransfer` / `_safeTransferFrom` accept both bool-returning and non-returning ERC-20 implementations, and revert with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value.
+- **SafeERC20-style transfers.** `_safeTransfer` accepts both bool-returning and non-returning ERC-20 implementations, and reverts with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value. Inbound pulls from buyer and merchant use EIP-3009 (`transferWithAuthorization` / `receiveWithAuthorization`), which revert on the token side if the signature is invalid.
 - **Fee-receiver DoS escape hatch.** If the fee receiver is frozen by the token issuer (e.g., USDC blacklist) after authorization, `capture` and `charge` revert because `_distribute` cannot deliver the fee. The buyer's funds are not stuck: `void` (anytime, by the merchant) and `release` (after `authorizationExpiry`, by anyone) skip `_distribute` and always return escrowed funds to the buyer. Same applies if the merchant address itself is frozen — the buyer recovers via `release`.
-- **Merchant refund-window exposure.** `refundExpiry` has no upper bound. The merchant must keep an ERC-20 allowance to _rail0_ for the duration of any active `refundExpiry` (since `refund` pulls via `transferFrom`). Best practice is to set bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not to set `refundExpiry` to the far future.
+- **Merchant refund-window exposure.** `refundExpiry` has no upper bound, and it is the `validBefore` pinned into the merchant's EIP-3009 refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature, not `approve`), so there is no idle-allowance risk. Still, best practice is to set bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not to set `refundExpiry` to the far future.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
 - **Test coverage.** A 98-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry/fee validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` / `_safeTransferFrom` failure handling on bool=false-returning tokens, fee-distribution rounding (dust flooring, conservation across (amount, feeBps) combinations, no-overflow at `uint120.max` × max fee, partial-capture splitting effects), fee-receiver blacklist DoS resilience (`capture` reverts; `void`/`release` recover), boundary conditions (equal expiries, max feeBps, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
@@ -273,15 +286,6 @@ export REFUND_EXPIRY=1738972800     # refund-by deadline (Unix seconds)
 export PAYMENT="($PAYER,$PAYEE,$TOKEN,$AMOUNT,$AUTH_EXPIRY,$REFUND_EXPIRY,250,$FEE_RCV)"
 export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48,uint16,address)'
 export PAYMENT_ID=$(cast keccak "order-12345")
-```
-
-### One-time merchant approval
-
-The buyer never needs to call `approve` — EIP-3009 doesn't touch allowance. The merchant does need to approve _rail0_ once, because captured funds live in the merchant's own wallet (not in the contract), so refunds work by pulling from there via `transferFrom` — which requires a standing allowance:
-
-```sh
-cast send $TOKEN "approve(address,uint256)" $RAIL0 $(cast max-uint) \
-  --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
 ### Authorize (buyer signs EIP-3009, merchant submits)
@@ -339,13 +343,30 @@ cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Refund (merchant)
+### Refund (merchant signs EIP-3009, anyone submits)
 
-Pulls from merchant's own wallet back to buyer. Requires the merchant's standing ERC-20 approval set up at onboarding (see [One-time merchant approval](#one-time-merchant-approval)).
+Pulls from the merchant's own wallet back to the buyer using the same EIP-3009 pattern as Authorize — no allowance, no `approve`. The merchant signs a `TransferWithAuthorization` over the token's domain with `from = $PAYEE`, `to = $RAIL0`, `value` = the refund amount, `validAfter = 0`, `validBefore = $REFUND_EXPIRY`, and the nonce from `refundNonce`; anyone can then submit it.
 
 ```sh
-cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256)" \
-  $PAYMENT_ID "$PAYMENT" 50000000 \
+# 1. Compute the refund nonce for the CURRENT refundable balance.
+#    refundableAmount comes from the payment state (here: a full 50000000 refund).
+NONCE=$(cast call $RAIL0 "refundNonce(bytes32,bytes32,uint120)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH 50000000 --rpc-url $RPC)
+
+# 2. Build the EIP-3009 TransferWithAuthorization digest over the TOKEN's domain.
+#    value = 50000000, validAfter = 0, validBefore = $REFUND_EXPIRY.
+STRUCT_HASH=$(cast keccak $(cast abi-encode \
+  "f(bytes32,address,address,uint256,uint256,uint256,bytes32)" \
+  $TWA_TYPEHASH $PAYEE $RAIL0 50000000 0 $REFUND_EXPIRY $NONCE))
+DIGEST=$(cast keccak 0x1901${TOKEN_DOMAIN:2}${STRUCT_HASH:2})
+
+# 3. Merchant signs; split into v, r, s.
+SIG=$(cast wallet sign --no-hash --private-key $PAYEE_KEY $DIGEST)
+R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
+
+# 4. Anyone submits — funds always reach $PAYER.
+cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
+  $PAYMENT_ID "$PAYMENT" 50000000 $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
