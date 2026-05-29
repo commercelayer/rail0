@@ -17,7 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "8";
+    string public constant VERSION = "9";
 
     /// @dev 100% in basis points.
     uint16 internal constant MAX_FEE_BPS = 10_000;
@@ -168,7 +168,6 @@ contract RAIL0 {
     error DuplicateToken();
     error TransferFailed();
     error Reentrancy();
-    error InvalidRefundNonce();
 
     // ================================================================
     //  Buyer-initiated operations (EIP-3009 signed off-chain, anyone submits)
@@ -490,13 +489,6 @@ contract RAIL0 {
     ///      and non-returning ERC-20 implementations.
     function _safeTransfer(address token, address to, uint256 amount) internal {
         (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));
-        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
-    }
-
-    /// @dev Calls `transferFrom` on `token` and reverts on failure. Accepts both
-    ///      bool-returning and non-returning ERC-20 implementations.
-    function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
-        (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transferFrom, (from, to, amount)));
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 }

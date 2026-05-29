@@ -31,8 +31,8 @@ Currently targeted:
 
 | Chain | Network | Stablecoin(s) | _rail0_ address |
 |-------|---------|---------------|-----------------|
-| Arc | testnet | USDC, EURC | [`0x7337...81d0`](https://testnet.arcscan.app/address/0x7337ce441e831ef2904b7B2f33507d655a4381d0) |
-| Celo | Sepolia testnet | USDC, USDT | [`0xcEA3...40B7`](https://celo-sepolia.blockscout.com/address/0xcEA3E28cb387929876F7b1c452460fF3F40C40B7) |
+| Arc | testnet | USDC, EURC | [`0x0e39...4364`](https://testnet.arcscan.app/address/0x0e393A626EfC45EBd030EBB997CDa207013C4364) |
+| Celo | Sepolia testnet | USDC, USDT | [`0x7337...81d0`](https://celo-sepolia.blockscout.com/address/0x7337ce441e831ef2904b7B2f33507d655a4381d0) |
 | Plasma | testnet | USDT0 | _planned_ |
 | Tempo | — | TIP-20 (EIP-2612 only today) | _waiting on EIP-3009_ |
 
@@ -164,7 +164,7 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="8", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="9", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
