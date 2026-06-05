@@ -38,11 +38,11 @@ Currently targeted:
 
 ## Protocol
 
-_rail0_ implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable smart contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-initiated operations use a single off-chain signature: the buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain, anyone (typically the merchant) submits the transaction, and the submitter pays gas natively. No allowance is granted, no separate intent typehash, no token approval — one signature, one transaction, no broadcasted setup from the buyer.
+_rail0_ implements the authorize → capture → refund lifecycle familiar from card networks as a single immutable smart contract: buyers and merchants transact directly, the protocol never custodies payment funds outside the active escrow window, and there is no owner, no admin, no upgradeability, and no protocol fee. Buyer-funded operations use a single off-chain signature: the buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain and the merchant (`p.payee`) submits the transaction and pays gas natively. Every operation is merchant-submitted, with one exception — `release`, which either the payer or the payee may submit to return escrowed funds to the buyer. No allowance is granted, no separate intent typehash, no token approval — one signature, one transaction, no broadcasted setup from the buyer.
 
 ### Lifecycle
 
-A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain, the merchant (or anyone) submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline anyone may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so a single field controls both the submission deadline and (for `authorize`) the merchant's capture window. Each operation is detailed below in lifecycle order.
+A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain and the merchant submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline either the payer or the payee may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so a single field controls both the submission deadline and (for `authorize`) the merchant's capture window. Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -104,7 +104,7 @@ function release(bytes32 paymentId, Payment calldata p) external;
 
 Buyer's safety net — return escrowed funds to the buyer if the merchant never captured.
 
-**Anyone may call** — funds always go to `p.payer` regardless of who submits, so there is no theft potential and the buyer doesn't need to hold the chain's gas asset to recover their funds. A relayer or watchdog service can submit the release on the buyer's behalf. Only callable after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — _rail0_ has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
+**Only the payer or the payee may call** — funds always go to `p.payer` regardless of which of the two submits, so there is no theft potential. The buyer can submit this themselves to recover their escrowed funds, or the merchant can submit it to settle. Only callable after `block.timestamp >= p.authorizationExpiry`. Returns the full remaining `capturableAmount` (all-or-nothing) and zeroes that slot. This is the buyer's only on-chain recourse if the merchant disappears — _rail0_ has no arbitration layer. Setting a sensible `authorizationExpiry` is therefore important for the buyer: it is the timestamp at which the merchant's "right to capture" ends and the buyer's "right to recover" begins.
 
 #### Refund
 
@@ -121,7 +121,7 @@ function refund(
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
 
-Captured funds live in the merchant's wallet (not the contract), so `refund` pulls them back using the **same EIP-3009 pattern as `authorize`/`charge`** — symmetric, no allowance. The merchant (`p.payee`) signs an EIP-3009 `TransferWithAuthorization` over the token's domain off-chain with `from = p.payee`, `to = address(rail0)`, `value = amount`, `validAfter = 0`, `validBefore = p.refundExpiry`, and `nonce = keccak256(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount)`. **Anyone** can submit the transaction. The contract checks the payment exists, that `block.timestamp < p.refundExpiry` and `0 < amount ≤ refundableAmount`, decrements `refundableAmount -= amount`, then calls `token.receiveWithAuthorization(...)` to pull the funds from the merchant into _rail0_ and immediately forwards them to `p.payer` via `transfer`. No ERC-20 `approve` is ever needed.
+Captured funds live in the merchant's wallet (not the contract), so `refund` pulls them back using the **same EIP-3009 pattern as `authorize`/`charge`** — symmetric, no allowance. The merchant (`p.payee`) signs an EIP-3009 `TransferWithAuthorization` over the token's domain off-chain with `from = p.payee`, `to = address(rail0)`, `value = amount`, `validAfter = 0`, `validBefore = p.refundExpiry`, and `nonce = keccak256(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount)`. **Only the merchant (`p.payee`)** may submit the transaction. The contract checks the caller is the payee, that the payment exists, that `block.timestamp < p.refundExpiry` and `0 < amount ≤ refundableAmount`, decrements `refundableAmount -= amount`, then calls `token.receiveWithAuthorization(...)` to pull the funds from the merchant into _rail0_ and immediately forwards them to `p.payer` via `transfer`. No ERC-20 `approve` is ever needed.
 
 The refund nonce encodes the **current** `refundableAmount`, so each partial refund has a unique, deterministic nonce tied to the payment's state at signing time. _rail0_ always derives the nonce from the live `refundableAmount` when it calls the token, so a stale signature (made against an earlier `refundableAmount`) produces a different nonce than the one the merchant signed — the token's EIP-712 check recovers a signer that doesn't match `p.payee` and reverts. A replay of the same signed refund is rejected by the token's used-nonce tracking. Use `refundNonce(paymentId, configHash, refundableAmount)` to compute the value off-chain.
 
@@ -187,7 +187,7 @@ The domain separator is cached at construction and rebuilt automatically if `blo
 
 _rail0_ does not custody anything outside the active escrow window, and **no allowance grant ever happens for either party** — every wallet-to-contract movement uses an EIP-3009 signature:
 
-- **Buyer.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to _rail0_ atomically based on the buyer's signature alone (for `authorize` / `charge`). The buyer never calls `approve`, never grants an allowance, never broadcasts any transaction.
+- **Buyer.** EIP-3009's `transferWithAuthorization` moves funds from the buyer's wallet to _rail0_ atomically based on the buyer's signature alone (for `authorize` / `charge`). The buyer never calls `approve`, never grants an allowance, and broadcasts no transaction to fund a payment — they only sign. (The buyer may optionally broadcast `release` after `authorizationExpiry` to recover an uncaptured escrow themselves.)
 - **Merchant.** Captured funds live in the merchant's wallet; `refund` pulls them back via EIP-3009 `receiveWithAuthorization` against a signature the merchant produces off-chain. The merchant never grants an allowance either. Nothing is required for `capture` / `void` / `release` (those distribute or move funds _rail0_ already holds).
 
 ### Events
@@ -211,7 +211,8 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 | Error                       | Cause                                                              |
 |-----------------------------|--------------------------------------------------------------------|
-| `NotPayee`                  | Caller is not the merchant for a merchant-only operation.          |
+| `NotPayee`                  | Caller is not the merchant on `authorize`/`charge`/`capture`/`void`/`refund`. |
+| `NotPayerOrPayee`           | `release` caller is neither the payer nor the payee.              |
 | `PaymentAlreadyExists`      | `paymentId` was already used.                                      |
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
@@ -237,11 +238,11 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 - **Reentrancy guard.** All six entrypoints (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) are protected by a `nonReentrant` modifier. Any attempt to reenter from inside a token call reverts with `Reentrancy`.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers. Even if the reentrancy guard were bypassed (it can't be) the CEI ordering already prevents same-payment double-spending.
 - **SafeERC20-style transfers.** `_safeTransfer` accepts both bool-returning and non-returning ERC-20 implementations, and reverts with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value. Inbound pulls from buyer and merchant use EIP-3009 (`transferWithAuthorization` / `receiveWithAuthorization`), which revert on the token side if the signature is invalid.
-- **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g., USDC blacklist) after authorization, `capture` reverts because the contract cannot deliver funds to `payee`. The buyer's escrowed funds are not stuck: `void` (anytime, by the merchant) and `release` (after `authorizationExpiry`, by anyone) send funds directly to the buyer, so they always have a recovery path.
+- **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g., USDC blacklist) after authorization, `capture` reverts because the contract cannot deliver funds to `payee`. The buyer's escrowed funds are not stuck: `void` (anytime, by the merchant) and `release` (after `authorizationExpiry`, by the payer or payee) send funds directly to the buyer, so they always have a recovery path.
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound, and it is the `validBefore` pinned into the merchant's EIP-3009 refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature, not `approve`), so there is no idle-allowance risk. Still, best practice is to set bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not to set `refundExpiry` to the far future.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** An 80-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, all amount/expiry validation), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` failure handling on bool=false-returning tokens, boundary conditions (equal expiries, exact authorizationExpiry), reentrancy attempts via a malicious mock token, and anyone-can-submit verification on `release`. No external audit has been performed.
+- **Test coverage.** An 81-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, `NotPayerOrPayee`, all amount/expiry validation), submitter-authorization gates (payee-only on `authorize`/`charge`/`capture`/`void`/`refund`; payer-or-payee on `release`), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` failure handling on bool=false-returning tokens, boundary conditions (equal expiries, exact authorizationExpiry), and reentrancy attempts via a malicious mock token. No external audit has been performed.
 
 ### Limits
 
@@ -337,9 +338,9 @@ cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Refund (merchant signs EIP-3009, anyone submits)
+### Refund (merchant signs EIP-3009 and submits)
 
-Pulls from the merchant's own wallet back to the buyer using the same EIP-3009 pattern as Authorize — no allowance, no `approve`. The merchant signs a `TransferWithAuthorization` over the token's domain with `from = $PAYEE`, `to = $RAIL0`, `value` = the refund amount, `validAfter = 0`, `validBefore = $REFUND_EXPIRY`, and the nonce from `refundNonce`; anyone can then submit it.
+Pulls from the merchant's own wallet back to the buyer using the same EIP-3009 pattern as Authorize — no allowance, no `approve`. The merchant signs a `TransferWithAuthorization` over the token's domain with `from = $PAYEE`, `to = $RAIL0`, `value` = the refund amount, `validAfter = 0`, `validBefore = $REFUND_EXPIRY`, and the nonce from `refundNonce`, then submits it (only `p.payee` may submit).
 
 ```sh
 # 1. Compute the refund nonce for the CURRENT refundable balance.
@@ -358,7 +359,7 @@ DIGEST=$(cast keccak 0x1901${TOKEN_DOMAIN:2}${STRUCT_HASH:2})
 SIG=$(cast wallet sign --no-hash --private-key $PAYEE_KEY $DIGEST)
 R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
 
-# 4. Anyone submits — funds always reach $PAYER.
+# 4. Merchant submits — funds always reach $PAYER.
 cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
   $PAYMENT_ID "$PAYMENT" 50000000 $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
@@ -389,15 +390,15 @@ cast send $RAIL0 "void(bytes32,$PAYMENT_TYPE)" \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
 
-### Release (anyone — public after authorizationExpiry)
+### Release (payer or payee — after authorizationExpiry)
 
-After `authorizationExpiry`, if no capture happened, anyone can submit `release` and the funds go to `p.payer`:
+After `authorizationExpiry`, if no capture happened, the payer or the payee can submit `release` and the funds go to `p.payer`:
 
 ```sh
-# A relayer / watchdog / the buyer themselves — any signing key works
+# Either the buyer (payer) or the merchant (payee) key works
 cast send $RAIL0 "release(bytes32,$PAYMENT_TYPE)" \
   $PAYMENT_ID "$PAYMENT" \
-  --rpc-url $RPC --private-key $RELAYER_KEY
+  --rpc-url $RPC --private-key $PAYER_KEY
 ```
 
 ### Reading state

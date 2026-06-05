@@ -6,10 +6,11 @@ import { IERC20, IEIP3009 } from "./interfaces/IERC20.sol";
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
 /// @notice Authorize, capture, void, release, and refund stablecoin payments on any
 ///         EVM-compatible chain whose accepted tokens implement EIP-3009
-///         (`transferWithAuthorization`). Buyer-initiated operations use a single
-///         EIP-3009 signature: the buyer signs off-chain, anyone (typically the
-///         merchant) submits the transaction and pays gas natively. The buyer never
-///         broadcasts a transaction and no token allowance state is touched.
+///         (`transferWithAuthorization`). Buyer-funded operations use a single
+///         EIP-3009 signature: the buyer signs off-chain and the merchant submits the
+///         transaction and pays gas natively, so no token allowance state is touched.
+///         Every operation is merchant-submitted, except `release`, which the payer or
+///         the payee may submit to return escrowed funds to the buyer.
 /// @dev    No owner, no admin, no upgradeability. The token allowlist is set in the
 ///         constructor and immutable thereafter.
 contract RAIL0 {
@@ -143,6 +144,7 @@ contract RAIL0 {
     // ================================================================
 
     error NotPayee();
+    error NotPayerOrPayee();
     error PaymentAlreadyExists();
     error PaymentNotFound();
     error PaymentMismatch();
@@ -162,7 +164,9 @@ contract RAIL0 {
     error Reentrancy();
 
     // ================================================================
-    //  Buyer-initiated operations (EIP-3009 signed off-chain, anyone submits)
+    //  Buyer-funded operations & release
+    //  authorize / charge: buyer signs EIP-3009 off-chain, merchant submits.
+    //  release: payer or payee submits to return escrow to the buyer.
     // ================================================================
 
     /// @notice Authorize funds: pull `p.amount` from buyer into escrow.
@@ -174,11 +178,12 @@ contract RAIL0 {
     ///         passes, the sig is dead at the token and the on-chain payment can no longer
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
-    ///         Anyone may submit this transaction; the submitter pays gas.
+    ///         Only `p.payee` (the merchant) may submit; the submitter pays gas.
     function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
     {
+        if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
 
@@ -204,11 +209,12 @@ contract RAIL0 {
     ///         signature can't be repurposed for charge (and vice versa). Here
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
-    ///         funds to `payee`.
+    ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
     function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
     {
+        if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
 
@@ -227,11 +233,12 @@ contract RAIL0 {
     }
 
     /// @notice Release escrowed funds back to the buyer after authorizationExpiry.
-    /// @dev    Anyone can call this — funds always go to `p.payer` regardless of submitter,
-    ///         so there is no theft potential. A buyer who has been ghosted by the merchant
-    ///         doesn't need to hold the chain's gas asset to recover their funds; a relayer
-    ///         or watchdog service can submit on their behalf.
+    /// @dev    Only the payer or the payee may call — funds always go to `p.payer`
+    ///         regardless of which of the two submits, so there is no theft potential.
+    ///         A buyer who has been ghosted by the merchant can submit this themselves to
+    ///         recover their escrowed funds; the merchant may also submit to settle.
     function release(bytes32 paymentId, Payment calldata p) external nonReentrant {
+        if (msg.sender != p.payer && msg.sender != p.payee) revert NotPayerOrPayee();
         PaymentState memory s = _loadAndVerify(paymentId, p);
         if (block.timestamp < p.authorizationExpiry) revert AuthorizationNotExpired();
         if (s.capturableAmount == 0) revert NothingToRelease();
@@ -296,7 +303,8 @@ contract RAIL0 {
     ///
     ///         The nonce encodes the current `refundableAmount` so each partial refund
     ///         has a unique, deterministic nonce — preventing replay and double-spending
-    ///         of the same refund position. Anyone may submit; funds always reach `p.payer`.
+    ///         of the same refund position. Only `p.payee` may submit; funds always reach
+    ///         `p.payer`.
     function refund(
         bytes32 paymentId,
         Payment calldata p,
@@ -305,6 +313,7 @@ contract RAIL0 {
         bytes32 r,
         bytes32 s
     ) external nonReentrant {
+        if (msg.sender != p.payee) revert NotPayee();
         PaymentState memory st = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
         if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
