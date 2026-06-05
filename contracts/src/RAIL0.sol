@@ -17,10 +17,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "9";
-
-    /// @dev 100% in basis points.
-    uint16 internal constant MAX_FEE_BPS = 10_000;
+    string public constant VERSION = "1.0.0";
 
     /// @dev EIP-712 typehash for the EIP712Domain struct.
     bytes32 internal constant _DOMAIN_TYPEHASH =
@@ -28,7 +25,7 @@ contract RAIL0 {
 
     /// @dev EIP-712 typehash for the Payment struct. Field order MUST match the struct layout.
     bytes32 internal constant _PAYMENT_TYPEHASH = keccak256(
-        "Payment(address payer,address payee,address token,uint120 amount,uint48 authorizationExpiry,uint48 refundExpiry,uint16 feeBps,address feeReceiver)"
+        "Payment(address payer,address payee,address token,uint120 amount,uint48 authorizationExpiry,uint48 refundExpiry)"
     );
 
     /// @dev Prefixes used to derive EIP-3009 nonces. A per-operation prefix ensures
@@ -116,8 +113,6 @@ contract RAIL0 {
         uint120 amount; // exact amount the payer commits to pay
         uint48 authorizationExpiry; // cutoff for capture; release opens after
         uint48 refundExpiry; // cutoff for refund
-        uint16 feeBps; // fee in basis points (0–10000)
-        address feeReceiver; // recipient of fee on each capture and charge (address(0) if no fee)
     }
 
     /// @notice Mutable payment state, packed in one storage slot (248 bits).
@@ -156,9 +151,6 @@ contract RAIL0 {
     error AuthorizationExpired();
     error AuthorizationNotExpired();
     error RefundExpired();
-    error FeeBpsTooHigh();
-    error ZeroFeeReceiver();
-    error FeeReceiverIsParty();
     error ZeroAddress();
     error InvalidCaptureAmount();
     error InvalidRefundAmount();
@@ -211,8 +203,8 @@ contract RAIL0 {
     ///         payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an authorize-
     ///         signature can't be repurposed for charge (and vice versa). Here
     ///         `authorizationExpiry` is the submission deadline only — there is no
-    ///         escrow window because the contract immediately distributes the buyer's
-    ///         funds to `payee` + `feeReceiver`.
+    ///         escrow window because the contract immediately forwards the buyer's
+    ///         funds to `payee`.
     function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
@@ -229,7 +221,7 @@ contract RAIL0 {
             _chargeNonce(paymentId, configHash), v, r, s
         );
 
-        _distribute(p, p.amount);
+        _safeTransfer(p.token, p.payee, p.amount);
 
         emit PaymentCharged(paymentId, p.payer, p.payee, p);
     }
@@ -256,7 +248,7 @@ contract RAIL0 {
     //  Merchant-initiated operations
     // ================================================================
 
-    /// @notice Capture authorized funds: pay merchant + fee receiver.
+    /// @notice Capture authorized funds: pay the merchant.
     function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         PaymentState memory s = _loadAndVerify(paymentId, p);
@@ -268,7 +260,7 @@ contract RAIL0 {
         _state[paymentId].capturableAmount = s.capturableAmount - captureAmount120;
         _state[paymentId].refundableAmount = s.refundableAmount + captureAmount120;
 
-        _distribute(p, amount);
+        _safeTransfer(p.token, p.payee, amount);
 
         emit PaymentCaptured(paymentId, p.payer, p.payee, amount);
     }
@@ -419,11 +411,6 @@ contract RAIL0 {
         if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
-        if (p.feeBps > MAX_FEE_BPS) revert FeeBpsTooHigh();
-        if (p.feeBps > 0) {
-            if (p.feeReceiver == address(0)) revert ZeroFeeReceiver();
-            if (p.feeReceiver == p.payer || p.feeReceiver == p.payee) revert FeeReceiverIsParty();
-        }
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
         }
@@ -436,23 +423,6 @@ contract RAIL0 {
         if (_configHash[paymentId] != _hash(p)) revert PaymentMismatch();
     }
 
-    /// @dev Split `amount` between fee receiver and payee. Integer (floor) division means
-    ///      sub-unit dust always rounds toward the payee — the fee receiver absorbs the
-    ///      rounding loss and `fee + (amount - fee) == amount` exactly. Conservation holds
-    ///      for every input. Splitting one capture into N smaller partials therefore lowers
-    ///      total fee revenue when each partial floors independently; this is intentional
-    ///      and documented for facilitators sizing fees at expected capture granularity.
-    ///      No overflow: amount ≤ uint120.max and feeBps ≤ 10_000, so the product fits uint256.
-    function _distribute(Payment calldata p, uint256 amount) internal {
-        uint256 fee = (amount * p.feeBps) / MAX_FEE_BPS;
-        if (fee > 0) {
-            _safeTransfer(p.token, p.feeReceiver, fee);
-        }
-        if (amount > fee) {
-            _safeTransfer(p.token, p.payee, amount - fee);
-        }
-    }
-
     function _hash(Payment calldata p) internal view returns (bytes32) {
         bytes32 structHash = keccak256(
             abi.encode(
@@ -462,9 +432,7 @@ contract RAIL0 {
                 p.token,
                 p.amount,
                 p.authorizationExpiry,
-                p.refundExpiry,
-                p.feeBps,
-                p.feeReceiver
+                p.refundExpiry
             )
         );
         return keccak256(abi.encodePacked(hex"1901", _domainSeparator(), structHash));

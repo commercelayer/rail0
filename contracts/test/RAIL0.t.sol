@@ -142,25 +142,6 @@ contract MockTransferFromFails is MockERC20 {
     }
 }
 
-/// Token that maintains a per-address blacklist (USDC-style freeze). Transfer to a
-/// blacklisted address reverts. Used to verify the fee-receiver DoS escape hatch:
-/// capture/charge revert if feeReceiver is blacklisted, but void/release still
-/// work because they don't call _distribute.
-contract MockBlacklistERC20 is MockERC20 {
-    mapping(address => bool) public blacklisted;
-
-    function blacklist(address a) external {
-        blacklisted[a] = true;
-    }
-
-    function transfer(address to, uint256 amount) external override returns (bool) {
-        require(!blacklisted[to], "blacklisted");
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        return true;
-    }
-}
-
 /// Token whose transferWithAuthorization calls back into RAIL0 (reentrancy attempt).
 contract MockReentrant {
     bool public reenterAttempted;
@@ -204,7 +185,6 @@ contract RAIL0Test is Test {
     uint256 internal payerKey;
     address internal payee;
     uint256 internal payeeKey;
-    address internal feeReceiver = address(0xC0FFEE);
 
     uint48 internal authorizationExpiry;
     uint48 internal refundExpiry;
@@ -240,16 +220,8 @@ contract RAIL0Test is Test {
             token: address(token),
             amount: 100e6,
             authorizationExpiry: authorizationExpiry,
-            refundExpiry: refundExpiry,
-            feeBps: 0,
-            feeReceiver: address(0)
+            refundExpiry: refundExpiry
         });
-    }
-
-    function _paymentWithFee() internal view returns (RAIL0.Payment memory p) {
-        p = _payment();
-        p.feeBps = 250; // 2.5%
-        p.feeReceiver = feeReceiver;
     }
 
     /// Sign an EIP-3009 TransferWithAuthorization for the given token, with the
@@ -438,21 +410,6 @@ contract RAIL0Test is Test {
         assertEq(token.balanceOf(address(rail0)), 0);
     }
 
-    function test_Charge_WithFee_Distributes() public {
-        RAIL0.Payment memory p = _paymentWithFee();
-        _charge(PAYMENT_ID, p);
-        assertEq(token.balanceOf(feeReceiver), 2.5e6);
-        assertEq(token.balanceOf(payee), 97.5e6);
-    }
-
-    function test_Charge_FullFee_ZeroPayee() public {
-        RAIL0.Payment memory p = _paymentWithFee();
-        p.feeBps = 10_000;
-        _charge(PAYMENT_ID, p);
-        assertEq(token.balanceOf(feeReceiver), 100e6);
-        assertEq(token.balanceOf(payee), 0);
-    }
-
     function test_Charge_AuthorizeNonceDoesNotWorkForCharge() public {
         RAIL0.Payment memory p = _payment();
         bytes32 configHash = rail0.hashPayment(p);
@@ -618,147 +575,6 @@ contract RAIL0Test is Test {
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidCaptureAmount.selector);
         rail0.capture(PAYMENT_ID, p, 0);
-    }
-
-    function test_Capture_WithFee_Distributes() public {
-        RAIL0.Payment memory p = _paymentWithFee();
-        _authorize(PAYMENT_ID, p);
-
-        vm.prank(payee);
-        rail0.capture(PAYMENT_ID, p, 100e6);
-
-        assertEq(token.balanceOf(feeReceiver), 2.5e6);
-        assertEq(token.balanceOf(payee), 97.5e6);
-    }
-
-    // ============================================================
-    //  Fee distribution: rounding & dust
-    // ============================================================
-    //
-    // _distribute uses floor division: fee = (amount * feeBps) / 10_000.
-    // Invariants verified by these tests:
-    //   1. Sub-unit dust rounds toward the payee (fee receiver eats the loss).
-    //   2. Conservation: feeReceiver + payee == amount, exactly, for every input.
-    //   3. No overflow at uint120.max amount × max feeBps.
-    //   4. Splitting one capture into N partials lowers total fees because each
-    //      partial floors to fee=0 independently — documented behavior, not a bug.
-
-    /// @dev feeBps=250 (2.5%), amount=39 → fee=(39*250)/10000=0. Payee gets full 39.
-    function test_Capture_FeeRoundsDownDustToZero() public {
-        RAIL0.Payment memory p = _paymentWithFee(); // feeBps=250
-        p.amount = 39;
-        _authorize(PAYMENT_ID, p);
-
-        vm.prank(payee);
-        rail0.capture(PAYMENT_ID, p, 39);
-
-        assertEq(token.balanceOf(feeReceiver), 0, "fee floors to 0");
-        assertEq(token.balanceOf(payee), 39, "payee absorbs the dust");
-    }
-
-    /// @dev feeBps=250, amount=399 → (399*250)/10000 = 99750/10000 = 9 (truncated from 9.975).
-    ///      Payee gets 390, fee receiver gets 9. Conservation: 9 + 390 == 399.
-    function test_Capture_FeeRoundsDownTowardsPayee() public {
-        RAIL0.Payment memory p = _paymentWithFee();
-        p.amount = 399;
-        _authorize(PAYMENT_ID, p);
-
-        vm.prank(payee);
-        rail0.capture(PAYMENT_ID, p, 399);
-
-        assertEq(token.balanceOf(feeReceiver), 9, "9.975 floored to 9");
-        assertEq(token.balanceOf(payee), 390);
-    }
-
-    /// @dev Conservation check across a table of (feeBps, amount) — payee + feeReceiver
-    ///      must equal amount exactly for every combination.
-    function test_Capture_FeeMath_Conservation() public {
-        uint16[5] memory bpsTable = [uint16(1), 100, 250, 9_999, 10_000];
-        uint120[5] memory amountTable = [uint120(1), 7, 9_999, 100e6, 1e18];
-
-        for (uint256 i = 0; i < bpsTable.length; i++) {
-            for (uint256 j = 0; j < amountTable.length; j++) {
-                _runConservationCase(bpsTable[i], amountTable[j], i * amountTable.length + j);
-            }
-        }
-    }
-
-    /// @dev Helper extracted to keep stack pressure down inside the nested loop above.
-    function _runConservationCase(uint16 bps, uint120 amount, uint256 salt) internal {
-        bytes32 paymentId = keccak256(abi.encodePacked("conservation", salt));
-
-        RAIL0.Payment memory p = _payment();
-        p.amount = amount;
-        p.feeBps = bps;
-        p.feeReceiver = bps == 0 ? address(0) : feeReceiver;
-
-        // Top up payer so we don't run out across iterations.
-        token.mint(payer, amount);
-
-        uint256 payeeBefore = token.balanceOf(payee);
-        uint256 feeRcvBefore = token.balanceOf(feeReceiver);
-
-        _charge(paymentId, p);
-
-        uint256 paidToPayee = token.balanceOf(payee) - payeeBefore;
-        uint256 paidToFee = token.balanceOf(feeReceiver) - feeRcvBefore;
-
-        assertEq(paidToPayee + paidToFee, amount, "conservation: payee + fee == amount");
-        assertEq(paidToFee, (uint256(amount) * bps) / 10_000, "fee matches floor formula");
-    }
-
-    /// @dev Stress the multiplication: amount near uint120.max × max feeBps must not overflow
-    ///      and must distribute correctly. uint120.max ≈ 1.3e36; × 9999 ≈ 1.3e40, far below 2^256.
-    function test_Capture_FeeMath_NoOverflowAtUint120Max() public {
-        uint120 huge = type(uint120).max;
-
-        RAIL0.Payment memory p = _payment();
-        p.amount = huge;
-        p.feeBps = 9_999;
-        p.feeReceiver = feeReceiver;
-
-        token.mint(payer, huge);
-
-        _charge(PAYMENT_ID, p);
-
-        uint256 expectedFee = (uint256(huge) * 9_999) / 10_000;
-        assertEq(token.balanceOf(feeReceiver), expectedFee);
-        assertEq(token.balanceOf(payee), uint256(huge) - expectedFee);
-        assertEq(token.balanceOf(feeReceiver) + token.balanceOf(payee), huge, "conservation at max");
-    }
-
-    /// @dev Splitting captures lowers total fee due to per-partial flooring. With feeBps=100
-    ///      (1%) on 99 units: one capture → fee=0 (floors); 33+33+33 → also 0 each. With
-    ///      feeBps=100 on 9999: one capture → fee=99; 3333+3333+3333 → 33+33+33=99 (no loss).
-    ///      But on 100 with feeBps=100: one capture → fee=1; 50+50 → 0+0 = 0 (lost fee).
-    ///      This test pins down that documented gotcha.
-    function test_Capture_SplittingPartialsCanReduceTotalFee() public {
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 100; // 1%
-        p.feeReceiver = feeReceiver;
-        p.amount = 100;
-
-        _authorize(PAYMENT_ID, p);
-
-        vm.startPrank(payee);
-        rail0.capture(PAYMENT_ID, p, 50);
-        rail0.capture(PAYMENT_ID, p, 50);
-        vm.stopPrank();
-
-        assertEq(token.balanceOf(feeReceiver), 0, "two 50-unit captures: each fee floors to 0");
-        assertEq(token.balanceOf(payee), 100, "merchant kept the dust both times");
-    }
-
-    /// @dev Same dust scenario via charge (one-shot): on a 39-unit charge at feeBps=250,
-    ///      fee is 0 and payee receives the full 39. Verifies _distribute behaves
-    ///      identically when invoked from the charge path.
-    function test_Charge_FeeRoundsDownDustToZero() public {
-        RAIL0.Payment memory p = _paymentWithFee();
-        p.amount = 39;
-        _charge(PAYMENT_ID, p);
-
-        assertEq(token.balanceOf(feeReceiver), 0);
-        assertEq(token.balanceOf(payee), 39);
     }
 
     // ============================================================
@@ -1207,46 +1023,6 @@ contract RAIL0Test is Test {
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
-    function test_Validation_RejectsHighFeeBps() public {
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 10_001;
-        p.feeReceiver = feeReceiver;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
-
-        vm.expectRevert(RAIL0.FeeBpsTooHigh.selector);
-        rail0.authorize(PAYMENT_ID, p, v, r, s);
-    }
-
-    function test_Validation_RejectsZeroFeeReceiverWhenFeeBpsSet() public {
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 100;
-        p.feeReceiver = address(0);
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
-
-        vm.expectRevert(RAIL0.ZeroFeeReceiver.selector);
-        rail0.authorize(PAYMENT_ID, p, v, r, s);
-    }
-
-    function test_Validation_RejectsFeeReceiverEqualsPayer() public {
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 100;
-        p.feeReceiver = payer;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
-
-        vm.expectRevert(RAIL0.FeeReceiverIsParty.selector);
-        rail0.authorize(PAYMENT_ID, p, v, r, s);
-    }
-
-    function test_Validation_RejectsFeeReceiverEqualsPayee() public {
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 100;
-        p.feeReceiver = payee;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
-
-        vm.expectRevert(RAIL0.FeeReceiverIsParty.selector);
-        rail0.authorize(PAYMENT_ID, p, v, r, s);
-    }
-
     function test_Validation_RejectsZeroPayer() public {
         RAIL0.Payment memory p = _payment();
         p.payer = address(0);
@@ -1291,46 +1067,6 @@ contract RAIL0Test is Test {
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
     }
 
-    function test_Validation_AcceptsMaxFeeBpsWithReceiver() public {
-        // feeBps == 10000 (100%) is the boundary — should be accepted.
-        RAIL0.Payment memory p = _payment();
-        p.feeBps = 10_000;
-        p.feeReceiver = feeReceiver;
-        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
-
-        rail0.authorize(PAYMENT_ID, p, v, r, s);
-        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
-    }
-
-    // ============================================================
-    //  Distribute (fee splitting)
-    // ============================================================
-
-    function test_Distribute_RoundsFeeDown() public {
-        // Tiny amount × small bps rounds the fee down to 0.
-        // amount=1, feeBps=100 (1%) → fee = 1*100/10000 = 0 → all goes to payee.
-        RAIL0.Payment memory p = _paymentWithFee(); // feeBps = 250
-        p.feeBps = 100;
-        p.amount = 1;
-        _charge(PAYMENT_ID, p);
-
-        assertEq(token.balanceOf(feeReceiver), 0);
-        assertEq(token.balanceOf(payee), 1);
-    }
-
-    function test_Distribute_NoFeeWhenAmountTooSmall() public {
-        // Verify that when fee rounds to 0, no `transfer` is even attempted to feeReceiver.
-        // (Implementation should `if (fee > 0)` skip the call entirely.)
-        RAIL0.Payment memory p = _paymentWithFee();
-        p.feeReceiver = feeReceiver; // address that hasn't received tokens yet
-        p.feeBps = 1; // 0.01%
-        p.amount = 99; // 99*1/10000 = 0 (rounds down)
-        _charge(PAYMENT_ID, p);
-
-        assertEq(token.balanceOf(feeReceiver), 0);
-        assertEq(token.balanceOf(payee), 99);
-    }
-
     // ============================================================
     //  Views
     // ============================================================
@@ -1357,7 +1093,7 @@ contract RAIL0Test is Test {
         assertTrue(rail0.hashPayment(p2) != baseHash);
 
         RAIL0.Payment memory p3 = _payment();
-        p3.feeBps = 1;
+        p3.refundExpiry = p1.refundExpiry + 1;
         assertTrue(rail0.hashPayment(p3) != baseHash);
 
         RAIL0.Payment memory p4 = _payment();
@@ -1498,66 +1234,6 @@ contract RAIL0Test is Test {
     }
 
     // ============================================================
-    //  Fee-receiver DoS resilience (token-level blacklist)
-    // ============================================================
-    //
-    // capture/charge call _distribute → token.transfer(feeReceiver, fee). If the
-    // token issuer freezes feeReceiver (USDC-style), those calls revert. void
-    // and release skip _distribute entirely and route funds directly to the payer,
-    // so the buyer's funds always have an escape hatch.
-
-    /// @dev Helper: deploy a fresh blacklist token + RAIL0, fund payer, authorize
-    ///      with a fee, and return everything wired up so each test can blacklist
-    ///      the fee receiver and exercise its specific path.
-    function _setupBlacklistAuthorize() internal returns (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) {
-        bToken = new MockBlacklistERC20();
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(bToken);
-        r = new RAIL0(tokens);
-        bToken.mint(payer, 1000e6);
-
-        p = _payment();
-        p.token = address(bToken);
-        p.feeBps = 250;
-        p.feeReceiver = feeReceiver;
-
-        bytes32 cfg = r.hashPayment(p);
-        bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
-        (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, bToken, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
-        r.authorize(PAYMENT_ID, p, v, rr, ss);
-    }
-
-    function test_Capture_RevertsIfFeeReceiverBlacklisted() public {
-        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
-        bToken.blacklist(feeReceiver);
-
-        vm.prank(payee);
-        vm.expectRevert(); // token reverts inside _distribute → capture aborts
-        r.capture(PAYMENT_ID, p, 100e6);
-    }
-
-    function test_Void_WorksEvenIfFeeReceiverBlacklisted() public {
-        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
-        bToken.blacklist(feeReceiver);
-
-        uint256 payerBefore = bToken.balanceOf(payer);
-        vm.prank(payee);
-        r.void(PAYMENT_ID, p);
-        assertEq(bToken.balanceOf(payer), payerBefore + 100e6, "void returns full escrow to payer");
-    }
-
-    function test_Release_WorksEvenIfFeeReceiverBlacklisted() public {
-        (MockBlacklistERC20 bToken, RAIL0 r, RAIL0.Payment memory p) = _setupBlacklistAuthorize();
-        bToken.blacklist(feeReceiver);
-
-        vm.warp(uint256(p.authorizationExpiry));
-        uint256 payerBefore = bToken.balanceOf(payer);
-        r.release(PAYMENT_ID, p); // anyone may call
-        assertEq(bToken.balanceOf(payer), payerBefore + 100e6, "release returns full escrow to payer");
-    }
-
-    // ============================================================
     //  Reentrancy
     // ============================================================
 
@@ -1595,8 +1271,8 @@ contract RAIL0Test is Test {
     //  End-to-end happy path
     // ============================================================
 
-    function test_E2E_AuthorizeCaptureRefund_WithFee() public {
-        RAIL0.Payment memory p = _paymentWithFee();
+    function test_E2E_AuthorizeCaptureRefund() public {
+        RAIL0.Payment memory p = _payment();
         p.amount = 200e6;
 
         _authorize(PAYMENT_ID, p);
@@ -1604,14 +1280,13 @@ contract RAIL0Test is Test {
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 200e6);
 
-        assertEq(token.balanceOf(feeReceiver), 5e6);
-        assertEq(token.balanceOf(payee), 195e6);
+        assertEq(token.balanceOf(payee), 200e6);
 
-        // Refund half of the gross captured amount via EIP-3009 signature
+        // Refund half of the captured amount via EIP-3009 signature
         _refund(PAYMENT_ID, p, 100e6);
 
-        // Payee paid back 100e6 from their own wallet (195e6 received - 100e6 refunded)
-        assertEq(token.balanceOf(payee), 95e6);
+        // Payee paid back 100e6 from their own wallet (200e6 received - 100e6 refunded)
+        assertEq(token.balanceOf(payee), 100e6);
         assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 100e6);
     }
 }
