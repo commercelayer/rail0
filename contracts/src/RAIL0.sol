@@ -18,7 +18,12 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "1.0.0";
+    string public constant VERSION = "1.1.0";
+
+    /// @dev Reason emitted on the `DisputeClosed` event when a dispute is closed
+    ///      automatically by a full refund (one that brings `refundableAmount` to 0).
+    ///      Lets indexers distinguish a refund-driven close from a buyer withdrawal.
+    bytes32 public constant REASON_FULL_REFUND = keccak256("rail0.dispute.full_refund");
 
     /// @dev EIP-712 typehash for the EIP712Domain struct.
     bytes32 internal constant _DOMAIN_TYPEHASH =
@@ -116,11 +121,12 @@ contract RAIL0 {
         uint48 refundExpiry; // cutoff for refund
     }
 
-    /// @notice Mutable payment state, packed in one storage slot (248 bits).
+    /// @notice Mutable payment state, packed in one storage slot (256 bits).
     struct PaymentState {
         bool exists; //   8 bits — set on first authorize/charge
         uint120 capturableAmount; // 120 bits — funds held in escrow
         uint120 refundableAmount; // 120 bits — funds with payee, still refundable
+        bool disputed; //   8 bits — buyer has an open dispute (signal only, no fund effect)
     }
 
     mapping(bytes32 => PaymentState) internal _state;
@@ -139,12 +145,25 @@ contract RAIL0 {
     event PaymentReleased(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
     event PaymentRefunded(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
 
+    /// @notice Buyer opened a dispute against a payment. Signal only — no funds move.
+    /// @param reason Caller-supplied code (e.g. `keccak256(text)`); meaning lives off-chain.
+    event PaymentDisputed(bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
+
+    /// @notice An open dispute was closed. `closedBy` is the payer on a withdrawal, or the
+    ///         refund submitter (payee) on a full-refund auto-close.
+    /// @param reason `REASON_FULL_REFUND` on an auto-close; otherwise a caller-supplied code.
+    event DisputeClosed(bytes32 indexed paymentId, address indexed closedBy, bytes32 reason);
+
     // ================================================================
     //  Errors
     // ================================================================
 
     error NotPayee();
+    error NotPayer();
     error NotPayerOrPayee();
+    error AlreadyDisputed();
+    error NotDisputed();
+    error NothingToDispute();
     error PaymentAlreadyExists();
     error PaymentNotFound();
     error PaymentMismatch();
@@ -189,7 +208,8 @@ contract RAIL0 {
 
         bytes32 configHash = _hash(p);
         _configHash[paymentId] = configHash;
-        _state[paymentId] = PaymentState({ exists: true, capturableAmount: p.amount, refundableAmount: 0 });
+        _state[paymentId] =
+            PaymentState({ exists: true, capturableAmount: p.amount, refundableAmount: 0, disputed: false });
 
         // EIP-3009 pulls funds — token verifies the buyer's signature. Tampering with
         // any Payment field changes the configHash, which changes the nonce, which
@@ -220,7 +240,8 @@ contract RAIL0 {
 
         bytes32 configHash = _hash(p);
         _configHash[paymentId] = configHash;
-        _state[paymentId] = PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount });
+        _state[paymentId] =
+            PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount, disputed: false });
 
         IEIP3009(p.token).transferWithAuthorization(
             p.payer, address(this), p.amount, 0, p.authorizationExpiry,
@@ -249,6 +270,47 @@ contract RAIL0 {
         _safeTransfer(p.token, p.payer, amount);
 
         emit PaymentReleased(paymentId, p.payer, p.payee, amount);
+    }
+
+    // ================================================================
+    //  Buyer dispute signal (open / close lifecycle)
+    //  No fund effect: opening or closing a dispute never moves, blocks, or
+    //  escrows funds. The flag is an on-chain signal that off-chain systems
+    //  (indexer, merchant integrations) react to — typically with a refund.
+    // ================================================================
+
+    /// @notice Buyer opens a dispute against a payment. No funds move.
+    /// @dev    Payer only, only while within the refund window, and only on funds the
+    ///         merchant actually holds (`refundableAmount > 0`) — a pure authorization is
+    ///         cancelled via `void`, not disputed. Reverts if a dispute is already open;
+    ///         reopening after a close is allowed. No external calls, so no `nonReentrant`.
+    /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
+    function dispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
+        if (msg.sender != p.payer) revert NotPayer();
+        PaymentState memory s = _loadAndVerify(paymentId, p);
+        if (block.timestamp >= p.refundExpiry) revert RefundExpired();
+        if (s.refundableAmount == 0) revert NothingToDispute();
+        if (s.disputed) revert AlreadyDisputed();
+
+        _state[paymentId].disputed = true;
+
+        emit PaymentDisputed(paymentId, p.payer, p.payee, reason);
+    }
+
+    /// @notice Buyer withdraws their own open dispute. No funds move.
+    /// @dev    Payer only — the payee cannot dismiss a dispute; the merchant's only way to
+    ///         close one is to resolve it via a full `refund` (auto-close). No window
+    ///         restriction: withdrawing is always benign, so the payer can clear the flag
+    ///         even after `refundExpiry`. No external calls, so no `nonReentrant`.
+    /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
+    function closeDispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
+        if (msg.sender != p.payer) revert NotPayer();
+        PaymentState memory s = _loadAndVerify(paymentId, p);
+        if (!s.disputed) revert NotDisputed();
+
+        _state[paymentId].disputed = false;
+
+        emit DisputeClosed(paymentId, msg.sender, reason);
     }
 
     // ================================================================
@@ -321,6 +383,14 @@ contract RAIL0 {
         // Safe cast: amount <= refundableAmount (uint120) checked above.
         uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
         _state[paymentId].refundableAmount = st.refundableAmount - refundAmount120;
+
+        // A full refund (one that zeroes refundableAmount) resolves any open dispute:
+        // clear the flag and emit the close event with the reserved reason. Effects only —
+        // this sits before the external calls, preserving checks-effects-interactions.
+        if (st.disputed && _state[paymentId].refundableAmount == 0) {
+            _state[paymentId].disputed = false;
+            emit DisputeClosed(paymentId, msg.sender, REASON_FULL_REFUND);
+        }
 
         // Pull funds from payee using their EIP-3009 signature — no allowance needed.
         // validBefore = p.refundExpiry ensures the signature is dead once the refund window closes.
