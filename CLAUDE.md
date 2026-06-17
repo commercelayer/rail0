@@ -12,14 +12,12 @@ rail0 is a multi-repo project. All repositories prefixed with `rail0-` are part 
 | `rail0-gateway` | Backend API (Ruby/Grape) |
 | `rail0-indexer` | On-chain event indexer (TypeScript/Envio) |
 | `rail0-admin` | Admin UI |
-| `rail0-api` | Legacy API (superseded by rail0-gateway) |
 | `rail0-cli` | CLI tool |
 | `rail0-ruby` | Ruby SDK |
 | `rail0-go` | Go SDK |
-| `rail0-ts` | TypeScript SDK |
-| `rail0-py` | Python SDK |
-| `rail0-rust` | Rust SDK |
 | `rail0-test` | Integration and cross-SDK tests |
+
+> Note: `rail0-api`, `rail0-ts`, `rail0-py`, and `rail0-rust` are temporarily out of scope.
 
 When a change in one repo affects the contract, the indexer, or any SDK, flag it explicitly and propose coordinated changes across the relevant repos.
 
@@ -47,9 +45,11 @@ When a change in one repo affects the contract, the indexer, or any SDK, flag it
 
 11. **Keep documentation and tests in sync.** After every change, update all of the following that are present in the repo: README, OpenAPI schema, database schema reference, Postman collection, and unit tests. Do not consider a task complete until all are consistent with the code.
 
-12. **Keep all SDKs aligned when asked.** When asked to update the SDKs, check every SDK repo (`rail0-ruby`, `rail0-go`, `rail0-ts`, `rail0-py`, `rail0-rust`, `rail0-cli`) for alignment with the current gateway API surface. For each SDK: update client methods, README, and unit tests. Flag any SDK where alignment requires a breaking change.
+12. **Keep all SDKs aligned when asked.** When asked to update the SDKs, check every SDK repo (`rail0-ruby`, `rail0-go`, `rail0-cli`) for alignment with the current gateway API surface. For each SDK: update client methods, README, and unit tests. Flag any SDK where alignment requires a breaking change.
 
 13. **Align all tests when asked.** When asked to align or update tests, cover both layers: unit tests in every affected repo (gateway, indexer, all SDKs), and integration tests in `rail0-test` (API tests, flow tests for each SDK language, and cross-SDK tests). Verify that test fixtures, helper methods, and expected response shapes are consistent with the current gateway behaviour.
+
+14. **ORM first, raw dataset only as a last resort.** Always use Sequel model associations and methods as the first approach. Drop down to raw dataset only when the ORM cannot express the query cleanly. In all cases, queries must return model instances, not plain hash rows.
 
 ## Repo-specific notes
 
