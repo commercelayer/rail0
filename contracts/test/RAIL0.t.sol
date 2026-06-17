@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import { Test } from "forge-std/Test.sol";
+import { Vm } from "forge-std/Vm.sol";
 import { RAIL0 } from "../src/RAIL0.sol";
 import { IERC20 } from "../src/interfaces/IERC20.sol";
 
@@ -191,6 +192,7 @@ contract RAIL0Test is Test {
 
     bytes32 internal constant PAYMENT_ID = keccak256("test-payment-1");
     uint256 internal constant FAR_FUTURE = type(uint256).max;
+    bytes32 internal constant DISPUTE_REASON = keccak256("item-not-received");
 
     function setUp() public {
         token = new MockERC20();
@@ -971,6 +973,259 @@ contract RAIL0Test is Test {
 
         assertEq(token.balanceOf(payer), payerBalBefore + 40e6);
         assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 60e6);
+    }
+
+    // ============================================================
+    //  Dispute: open (dispute)
+    // ============================================================
+
+    function test_Dispute_Success() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p); // refundable = 100e6
+
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        assertTrue(rail0.getPaymentState(PAYMENT_ID).disputed);
+    }
+
+    function test_Dispute_EmitsEvent() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.expectEmit(true, true, true, true);
+        emit RAIL0.PaymentDisputed(PAYMENT_ID, payer, payee, DISPUTE_REASON);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_RevertsIfNotPayer() public {
+        // Even the payee (merchant) cannot open a dispute — payer only.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.NotPayer.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_RevertsAfterRefundExpiry() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.warp(refundExpiry);
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.RefundExpired.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_RevertsIfNothingToDispute() public {
+        // Authorize-only payment: refundableAmount == 0, nothing the merchant holds.
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.NothingToDispute.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_RevertsIfAlreadyDisputed() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.startPrank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        vm.expectRevert(RAIL0.AlreadyDisputed.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        vm.stopPrank();
+    }
+
+    function test_Dispute_RevertsIfNonExistent() public {
+        RAIL0.Payment memory p = _payment();
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.PaymentNotFound.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_RevertsIfPaymentMismatch() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        p.amount = 9999e6;
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.PaymentMismatch.selector);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_Dispute_DoesNotAffectFunds() public {
+        // Opening (and later closing) a dispute leaves capturable/refundable untouched.
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 40e6); // capturable = 60e6, refundable = 40e6
+
+        uint256 railBalBefore = token.balanceOf(address(rail0));
+
+        vm.startPrank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        RAIL0.PaymentState memory sOpen = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(sOpen.capturableAmount, 60e6);
+        assertEq(sOpen.refundableAmount, 40e6);
+
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+        RAIL0.PaymentState memory sClosed = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(sClosed.capturableAmount, 60e6);
+        assertEq(sClosed.refundableAmount, 40e6);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(address(rail0)), railBalBefore);
+    }
+
+    // ============================================================
+    //  Dispute: close (closeDispute / withdraw)
+    // ============================================================
+
+    function test_CloseDispute_ByPayer() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.startPrank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.expectEmit(true, true, true, true);
+        emit RAIL0.DisputeClosed(PAYMENT_ID, payer, payee, payer, DISPUTE_REASON);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+        vm.stopPrank();
+
+        assertFalse(rail0.getPaymentState(PAYMENT_ID).disputed);
+    }
+
+    function test_CloseDispute_RevertsIfPayee() public {
+        // The merchant cannot dismiss a buyer's dispute.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.NotPayer.selector);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_CloseDispute_RevertsIfStranger() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.prank(makeAddr("stranger"));
+        vm.expectRevert(RAIL0.NotPayer.selector);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_CloseDispute_RevertsIfNotDisputed() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.NotDisputed.selector);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_CloseDispute_AllowedAfterRefundExpiry() public {
+        // The terminal-hanging case: an open dispute past refundExpiry can still be
+        // withdrawn by the payer at any time (closeDispute has no window).
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.warp(refundExpiry + 1 days);
+        vm.prank(payer);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        assertFalse(rail0.getPaymentState(PAYMENT_ID).disputed);
+    }
+
+    function test_Dispute_ReopenAfterClose() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.startPrank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+        assertFalse(rail0.getPaymentState(PAYMENT_ID).disputed);
+
+        // Reopen within the window succeeds.
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        vm.stopPrank();
+
+        assertTrue(rail0.getPaymentState(PAYMENT_ID).disputed);
+    }
+
+    // ============================================================
+    //  Dispute: auto-close on full refund
+    // ============================================================
+
+    function test_Refund_FullClosesDispute() public {
+        // authorize → capture → dispute → full refund auto-closes the dispute.
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 100e6); // refundable = 100e6
+
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+        assertTrue(rail0.getPaymentState(PAYMENT_ID).disputed);
+
+        // Full refund (zeroes refundableAmount) → DisputeClosed(REASON_FULL_REFUND).
+        // closedBy is the refund submitter (payee).
+        vm.expectEmit(true, true, true, true);
+        emit RAIL0.DisputeClosed(PAYMENT_ID, payer, payee, payee, rail0.REASON_FULL_REFUND());
+        _refund(PAYMENT_ID, p, 100e6);
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertFalse(s.disputed);
+        assertEq(s.refundableAmount, 0);
+    }
+
+    function test_Refund_PartialKeepsDispute() public {
+        // A partial refund (refundableAmount stays > 0) leaves the dispute open.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.recordLogs();
+        _refund(PAYMENT_ID, p, 40e6); // refundable 100e6 → 60e6
+
+        // No DisputeClosed emitted.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,address,address,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != closedSig, "DisputeClosed must not be emitted on partial refund");
+        }
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertTrue(s.disputed);
+        assertEq(s.refundableAmount, 60e6);
+    }
+
+    function test_Refund_FullNoDispute_NoCloseEvent() public {
+        // A full refund with no open dispute emits no DisputeClosed.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        vm.recordLogs();
+        _refund(PAYMENT_ID, p, 100e6);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,address,address,bytes32)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != closedSig, "DisputeClosed must not be emitted without an open dispute");
+        }
+
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 0);
     }
 
     // ============================================================

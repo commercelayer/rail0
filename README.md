@@ -42,7 +42,7 @@ _rail0_ implements the authorize → capture → refund lifecycle familiar from 
 
 ### Lifecycle
 
-A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain and the merchant submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline either the payer or the payee may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so a single field controls both the submission deadline and (for `authorize`) the merchant's capture window. Each operation is detailed below in lifecycle order.
+A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. The payment is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain and the merchant submits the transaction. Until `authorizationExpiry`, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer; after that deadline either the payer or the payee may submit `release` to return the remaining escrow to the buyer. Captured funds stay reversible: until `refundExpiry`, the merchant can `refund` any portion back to the buyer. The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so a single field controls both the submission deadline and (for `authorize`) the merchant's capture window. Alongside the fund lifecycle, the buyer can raise a `dispute` against captured funds while the refund window is open — a signal-only open/close record that moves no money (see _Dispute / Close dispute_). Each operation is detailed below in lifecycle order.
 
 #### Authorize
 
@@ -125,6 +125,21 @@ Captured funds live in the merchant's wallet (not the contract), so `refund` pul
 
 The refund nonce encodes the **current** `refundableAmount`, so each partial refund has a unique, deterministic nonce tied to the payment's state at signing time. _rail0_ always derives the nonce from the live `refundableAmount` when it calls the token, so a stale signature (made against an earlier `refundableAmount`) produces a different nonce than the one the merchant signed — the token's EIP-712 check recovers a signer that doesn't match `p.payee` and reverts. A replay of the same signed refund is rejected by the token's used-nonce tracking. Use `refundNonce(paymentId, configHash, refundableAmount)` to compute the value off-chain.
 
+#### Dispute / Close dispute
+
+```solidity
+function dispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external;
+function closeDispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external;
+```
+
+Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no fund effect** — opening or closing a dispute never moves, blocks, or escrows anything. It is a permanent, censorship-resistant on-chain record that the buyer is contesting a payment; off-chain systems (indexer, merchant integrations) react to it, typically by issuing a `refund`. This is the only entrypoint a buyer drives directly without an EIP-3009 signature — `dispute`/`closeDispute` are plain calls authenticated by `msg.sender`, and because they make no external calls they are **not** `nonReentrant`.
+
+`dispute` opens a dispute. **Only the payer** may call, only while `block.timestamp < p.refundExpiry`, and only on funds the merchant actually holds (`refundableAmount > 0`) — a pure, uncaptured authorization is cancelled via `void`, never disputed (`NothingToDispute` otherwise). It reverts `AlreadyDisputed` if one is already open. It sets `disputed = true` and emits `PaymentDisputed(paymentId, payer, payee, reason)`. `reason` is a caller-supplied `bytes32` code (e.g. `keccak256(text)`); its meaning lives off-chain.
+
+`closeDispute` withdraws an open dispute. **Only the payer** may call — the merchant cannot dismiss a buyer's dispute. The merchant's only way to close one is to actually resolve it via a **full `refund`** (one that brings `refundableAmount` to 0), which auto-closes the dispute and emits `DisputeClosed(paymentId, payer, payee, msg.sender, REASON_FULL_REFUND)` (with `closedBy = payee`). A manual withdrawal has no window restriction (the payer can clear the flag even after `refundExpiry`) and emits `DisputeClosed(paymentId, payer, payee, payer, reason)`. Reopening after a close is allowed within the refund window; each open and close emits its event, giving indexers the full history.
+
+A dispute opened but never resolved before `refundExpiry` stays `disputed == true` permanently — like every time bound in _rail0_, `refundExpiry` is a guard, not a state transition, and there is no keeper to flip it. The frozen flag is the faithful terminal record "contested, never resolved on-chain within the window"; off-chain systems read `disputed && now ≥ refundExpiry` to interpret it.
+
 ### The `Payment` struct
 
 A payment's terms are committed at authorization time and immutable thereafter. The struct is passed in calldata on every call and verified against a stored hash.
@@ -142,10 +157,10 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 
 Per `paymentId`, the contract keeps two storage entries:
 
-- `_state[paymentId]` — a packed slot containing `exists`, `capturableAmount`, `refundableAmount`. Once `exists` is set it never resets, preventing payment-ID reuse.
+- `_state[paymentId]` — a packed slot containing `exists`, `capturableAmount`, `refundableAmount`, and `disputed`. Once `exists` is set it never resets, preventing payment-ID reuse.
 - `_configHash[paymentId]` — the EIP-712 digest of the `Payment` struct, set on first call and never mutated.
 
-`capturableAmount` is funds **held in escrow** by the contract. `refundableAmount` is funds **already paid to the merchant** that are still reversible. `capture` moves money from the first bucket to the second (and out the door to the merchant); `refund` drains the second.
+`capturableAmount` is funds **held in escrow** by the contract. `refundableAmount` is funds **already paid to the merchant** that are still reversible. `capture` moves money from the first bucket to the second (and out the door to the merchant); `refund` drains the second. `disputed` is a buyer-controlled signal flag with no fund effect (see _Dispute / Close dispute_); the four fields pack into a single 256-bit storage slot, so the flag adds no extra slot cost.
 
 ### Token allowlist
 
@@ -162,7 +177,7 @@ Practical implications:
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.0.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.1.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -192,7 +207,7 @@ _rail0_ does not custody anything outside the active escrow window, and **no all
 
 ### Events
 
-Every lifecycle event indexes `paymentId`, `payer`, and `payee`, so indexers can filter by any party without a separate join:
+Every lifecycle event — fund-moving and dispute alike — indexes `paymentId`, `payer`, and `payee`, so indexers can filter by any party without a separate join:
 
 ```solidity
 event TokenAccepted(address indexed token);
@@ -203,7 +218,13 @@ event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, addres
 event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
 event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
 event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+
+// Dispute signal — no fund effect. `reason` is a caller-supplied bytes32 code (meaning off-chain).
+event PaymentDisputed  (bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
+event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, address indexed payee, address closedBy, bytes32 reason);
 ```
+
+`DisputeClosed` indexes `payer`/`payee` like every other event, so closes are filterable by party regardless of who closed them. The `closedBy` data field records the actor — the payer on a manual withdrawal, or the refund submitter (payee) on a full-refund auto-close; in the latter case `reason` is the reserved constant `REASON_FULL_REFUND` (`keccak256("rail0.dispute.full_refund")`).
 
 To correlate token transfers with a `paymentId`, indexers join the token's `Transfer` events with _rail0_'s lifecycle events on transaction hash and log ordering — the lifecycle event always lands in the same transaction as its corresponding transfers.
 
@@ -212,6 +233,7 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | Error                       | Cause                                                              |
 |-----------------------------|--------------------------------------------------------------------|
 | `NotPayee`                  | Caller is not the merchant on `authorize`/`charge`/`capture`/`void`/`refund`. |
+| `NotPayer`                  | Caller is not the buyer on `dispute`/`closeDispute`.              |
 | `NotPayerOrPayee`           | `release` caller is neither the payer nor the payee.              |
 | `PaymentAlreadyExists`      | `paymentId` was already used.                                      |
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
@@ -226,6 +248,9 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 | `InvalidRefundAmount`       | `amount == 0` or `amount > refundableAmount`.                      |
 | `NothingToVoid`             | `void` called with `capturableAmount == 0`.                        |
 | `NothingToRelease`          | `release` called with `capturableAmount == 0`.                     |
+| `NothingToDispute`          | `dispute` called with `refundableAmount == 0` (nothing the merchant holds). |
+| `AlreadyDisputed`           | `dispute` called while a dispute is already open.                 |
+| `NotDisputed`               | `closeDispute` called with no open dispute.                        |
 | `TokenNotAccepted`          | `p.token` is not in the deployment's allowlist.                    |
 | `DuplicateToken`            | Constructor `acceptedTokens` contained the same address twice.     |
 | `TransferFailed`            | A token `transfer` returned `false` or reverted.                   |
@@ -235,14 +260,14 @@ To correlate token transfers with a `paymentId`, indexers join the token's `Tran
 
 - **No privileged roles.** No owner, no pauser, no upgrade path. The contract code is fixed at deploy time. The token allowlist is set in the constructor and immutable thereafter.
 - **Curated trust boundary.** The deployer chooses which tokens _rail0_ will process. Including a hostile or weird ERC-20 in the allowlist is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s.
-- **Reentrancy guard.** All six entrypoints (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) are protected by a `nonReentrant` modifier. Any attempt to reenter from inside a token call reverts with `Reentrancy`.
+- **Reentrancy guard.** Every entrypoint that makes an external token call (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) is protected by a `nonReentrant` modifier; any attempt to reenter from inside a token call reverts with `Reentrancy`. `dispute` and `closeDispute` make no external calls and hold no `nonReentrant` modifier by design — the only fund-moving dispute path is the full-refund auto-close, which executes inside `refund`'s effects phase, already under its guard and ahead of any transfer.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers. Even if the reentrancy guard were bypassed (it can't be) the CEI ordering already prevents same-payment double-spending.
 - **SafeERC20-style transfers.** `_safeTransfer` accepts both bool-returning and non-returning ERC-20 implementations, and reverts with `TransferFailed` on any failure. Compatible with USDT-mainnet-style tokens that don't return a value. Inbound pulls from buyer and merchant use EIP-3009 (`transferWithAuthorization` / `receiveWithAuthorization`), which revert on the token side if the signature is invalid.
 - **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g., USDC blacklist) after authorization, `capture` reverts because the contract cannot deliver funds to `payee`. The buyer's escrowed funds are not stuck: `void` (anytime, by the merchant) and `release` (after `authorizationExpiry`, by the payer or payee) send funds directly to the buyer, so they always have a recovery path.
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound, and it is the `validBefore` pinned into the merchant's EIP-3009 refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature, not `approve`), so there is no idle-allowance risk. Still, best practice is to set bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not to set `refundExpiry` to the far future.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Integrators should use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
-- **Time-based dispute resolution only.** The protocol has no arbitration layer; the buyer's recourse is `release` after `authorizationExpiry`. Any other dispute handling is off-chain.
-- **Test coverage.** An 81-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, `NotPayerOrPayee`, all amount/expiry validation), submitter-authorization gates (payee-only on `authorize`/`charge`/`capture`/`void`/`refund`; payer-or-payee on `release`), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` failure handling on bool=false-returning tokens, boundary conditions (equal expiries, exact authorizationExpiry), and reentrancy attempts via a malicious mock token. No external audit has been performed.
+- **Time-based fund recourse only; disputes are signal, not arbitration.** The protocol has no arbitration layer: the only on-chain mechanism that moves funds back to the buyer is `release` after `authorizationExpiry` (for uncaptured escrow) and the merchant's discretionary `refund` (for captured funds). The `dispute`/`closeDispute` lifecycle adds a censorship-resistant on-chain record that the buyer is contesting a payment, but it has **no fund effect** — it cannot force, block, or move money. The contract enforces only the mechanical invariants of the lifecycle (payer-only open and withdraw, within the refund window, one open dispute at a time, payee-closes-only-via-full-refund); it has **no anti-abuse controls** (no rate-limit, reputation, or velocity checks), since it is immutable, permissionless, and has no identity primitives. Because a dispute carries no financial payoff, friendly-fraud abuse is structurally neutralized on-chain; detection and reaction (analytics, velocity limits, blocklists, the charge-vs-authorize lever, evidence correlation) belong off-chain in the indexer and merchant integrations.
+- **Test coverage.** A 99-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path on every entrypoint (`PaymentNotFound`, `PaymentMismatch`, `NotPayee`, `NotPayer`, `NotPayerOrPayee`, all amount/expiry validation), submitter-authorization gates (payee-only on `authorize`/`charge`/`capture`/`void`/`refund`; payer-or-payee on `release`; payer-only on `dispute`/`closeDispute`), the dispute open/close lifecycle (open within window, `NothingToDispute` on uncaptured funds, `AlreadyDisputed`, reopen-after-close, payer-only withdrawal with payee/stranger rejected, withdrawal allowed past `refundExpiry`, full-refund auto-close, partial refund keeps the dispute open, no spurious `DisputeClosed`, and funds untouched by open/close), EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification (wrong signer, tampered amount, tampered Payment, submission after `authorizationExpiry`, wrong nonce prefix, paymentId-replay protection), `_safeTransfer` failure handling on bool=false-returning tokens, boundary conditions (equal expiries, exact authorizationExpiry), and reentrancy attempts via a malicious mock token. No external audit has been performed.
 
 ### Limits
 
