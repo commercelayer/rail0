@@ -1093,7 +1093,7 @@ contract RAIL0Test is Test {
         rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
 
         vm.expectEmit(true, true, true, true);
-        emit RAIL0.DisputeClosed(PAYMENT_ID, payer, DISPUTE_REASON);
+        emit RAIL0.DisputeClosed(PAYMENT_ID, payer, payee, payer, DISPUTE_REASON);
         rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
         vm.stopPrank();
 
@@ -1180,8 +1180,8 @@ contract RAIL0Test is Test {
 
         // Full refund (zeroes refundableAmount) → DisputeClosed(REASON_FULL_REFUND).
         // closedBy is the refund submitter (payee).
-        vm.expectEmit(true, true, false, true);
-        emit RAIL0.DisputeClosed(PAYMENT_ID, payee, rail0.REASON_FULL_REFUND());
+        vm.expectEmit(true, true, true, true);
+        emit RAIL0.DisputeClosed(PAYMENT_ID, payer, payee, payee, rail0.REASON_FULL_REFUND());
         _refund(PAYMENT_ID, p, 100e6);
 
         RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
@@ -1201,7 +1201,7 @@ contract RAIL0Test is Test {
 
         // No DisputeClosed emitted.
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,bytes32)");
+        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,address,address,bytes32)");
         for (uint256 i = 0; i < logs.length; i++) {
             assertTrue(logs[i].topics[0] != closedSig, "DisputeClosed must not be emitted on partial refund");
         }
@@ -1220,7 +1220,7 @@ contract RAIL0Test is Test {
         _refund(PAYMENT_ID, p, 100e6);
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,bytes32)");
+        bytes32 closedSig = keccak256("DisputeClosed(bytes32,address,address,address,bytes32)");
         for (uint256 i = 0; i < logs.length; i++) {
             assertTrue(logs[i].topics[0] != closedSig, "DisputeClosed must not be emitted without an open dispute");
         }

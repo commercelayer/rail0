@@ -136,7 +136,7 @@ Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no f
 
 `dispute` opens a dispute. **Only the payer** may call, only while `block.timestamp < p.refundExpiry`, and only on funds the merchant actually holds (`refundableAmount > 0`) — a pure, uncaptured authorization is cancelled via `void`, never disputed (`NothingToDispute` otherwise). It reverts `AlreadyDisputed` if one is already open. It sets `disputed = true` and emits `PaymentDisputed(paymentId, payer, payee, reason)`. `reason` is a caller-supplied `bytes32` code (e.g. `keccak256(text)`); its meaning lives off-chain.
 
-`closeDispute` withdraws an open dispute. **Only the payer** may call — the merchant cannot dismiss a buyer's dispute. The merchant's only way to close one is to actually resolve it via a **full `refund`** (one that brings `refundableAmount` to 0), which auto-closes the dispute and emits `DisputeClosed(paymentId, msg.sender, REASON_FULL_REFUND)`. A manual withdrawal has no window restriction (the payer can clear the flag even after `refundExpiry`) and emits `DisputeClosed(paymentId, payer, reason)`. Reopening after a close is allowed within the refund window; each open and close emits its event, giving indexers the full history.
+`closeDispute` withdraws an open dispute. **Only the payer** may call — the merchant cannot dismiss a buyer's dispute. The merchant's only way to close one is to actually resolve it via a **full `refund`** (one that brings `refundableAmount` to 0), which auto-closes the dispute and emits `DisputeClosed(paymentId, payer, payee, msg.sender, REASON_FULL_REFUND)` (with `closedBy = payee`). A manual withdrawal has no window restriction (the payer can clear the flag even after `refundExpiry`) and emits `DisputeClosed(paymentId, payer, payee, payer, reason)`. Reopening after a close is allowed within the refund window; each open and close emits its event, giving indexers the full history.
 
 A dispute opened but never resolved before `refundExpiry` stays `disputed == true` permanently — like every time bound in _rail0_, `refundExpiry` is a guard, not a state transition, and there is no keeper to flip it. The frozen flag is the faithful terminal record "contested, never resolved on-chain within the window"; off-chain systems read `disputed && now ≥ refundExpiry` to interpret it.
 
@@ -207,7 +207,7 @@ _rail0_ does not custody anything outside the active escrow window, and **no all
 
 ### Events
 
-Every fund-moving lifecycle event indexes `paymentId`, `payer`, and `payee`, so indexers can filter by any party without a separate join. The dispute events index `paymentId` plus the relevant actor:
+Every lifecycle event — fund-moving and dispute alike — indexes `paymentId`, `payer`, and `payee`, so indexers can filter by any party without a separate join:
 
 ```solidity
 event TokenAccepted(address indexed token);
@@ -221,10 +221,10 @@ event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, addres
 
 // Dispute signal — no fund effect. `reason` is a caller-supplied bytes32 code (meaning off-chain).
 event PaymentDisputed  (bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
-event DisputeClosed    (bytes32 indexed paymentId, address indexed closedBy, bytes32 reason);
+event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, address indexed payee, address closedBy, bytes32 reason);
 ```
 
-`DisputeClosed.closedBy` is the payer on a manual withdrawal, or the refund submitter (payee) on a full-refund auto-close; in the latter case `reason` is the reserved constant `REASON_FULL_REFUND` (`keccak256("rail0.dispute.full_refund")`).
+`DisputeClosed` indexes `payer`/`payee` like every other event, so closes are filterable by party regardless of who closed them. The `closedBy` data field records the actor — the payer on a manual withdrawal, or the refund submitter (payee) on a full-refund auto-close; in the latter case `reason` is the reserved constant `REASON_FULL_REFUND` (`keccak256("rail0.dispute.full_refund")`).
 
 To correlate token transfers with a `paymentId`, indexers join the token's `Transfer` events with _rail0_'s lifecycle events on transaction hash and log ordering — the lifecycle event always lands in the same transaction as its corresponding transfers.
 

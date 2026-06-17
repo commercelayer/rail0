@@ -149,10 +149,14 @@ contract RAIL0 {
     /// @param reason Caller-supplied code (e.g. `keccak256(text)`); meaning lives off-chain.
     event PaymentDisputed(bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
 
-    /// @notice An open dispute was closed. `closedBy` is the payer on a withdrawal, or the
-    ///         refund submitter (payee) on a full-refund auto-close.
+    /// @notice An open dispute was closed. Indexes `payer`/`payee` like every other lifecycle
+    ///         event, so closes are filterable by party regardless of who closed them.
+    /// @param closedBy The actor: the payer on a withdrawal, or the refund submitter (payee)
+    ///         on a full-refund auto-close.
     /// @param reason `REASON_FULL_REFUND` on an auto-close; otherwise a caller-supplied code.
-    event DisputeClosed(bytes32 indexed paymentId, address indexed closedBy, bytes32 reason);
+    event DisputeClosed(
+        bytes32 indexed paymentId, address indexed payer, address indexed payee, address closedBy, bytes32 reason
+    );
 
     // ================================================================
     //  Errors
@@ -310,7 +314,7 @@ contract RAIL0 {
 
         _state[paymentId].disputed = false;
 
-        emit DisputeClosed(paymentId, msg.sender, reason);
+        emit DisputeClosed(paymentId, p.payer, p.payee, msg.sender, reason);
     }
 
     // ================================================================
@@ -389,7 +393,7 @@ contract RAIL0 {
         // this sits before the external calls, preserving checks-effects-interactions.
         if (st.disputed && _state[paymentId].refundableAmount == 0) {
             _state[paymentId].disputed = false;
-            emit DisputeClosed(paymentId, msg.sender, REASON_FULL_REFUND);
+            emit DisputeClosed(paymentId, p.payer, p.payee, msg.sender, REASON_FULL_REFUND);
         }
 
         // Pull funds from payee using their EIP-3009 signature — no allowance needed.
