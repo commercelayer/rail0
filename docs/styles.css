@@ -4,16 +4,16 @@
    No build step, no dependencies. */
 
 :root {
-  --ink: #0a0a0a;
-  --ink-soft: #3f3f46;
-  --ink-faint: #71717a;
-  --line: #e4e4e7;
-  --line-soft: #f0f0f1;
-  --bg: #ffffff;
-  --bg-soft: #fafafa;
-  --bg-code: #f6f6f7;
-  --accent: #2f6df6;
-  --accent-soft: rgba(47, 109, 246, 0.1);
+  --ink: #1c1814;
+  --ink-soft: #4a443c;
+  --ink-faint: #8a8175;
+  --line: #ddd7cc;
+  --line-soft: #e8e3d8;
+  --bg: #ece7dc;
+  --bg-soft: #e4ded2;
+  --bg-code: #e1dbcd;
+  --accent: #9a6a3c;
+  --accent-soft: rgba(154, 106, 60, 0.12);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
   --serif: "Lora", Georgia, "Times New Roman", serif;
