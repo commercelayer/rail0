@@ -53,6 +53,7 @@ body {
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden; /* contain the full-bleed hero diagram */
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -148,6 +149,36 @@ header.nav .wrap {
   max-width: 15ch;
 }
 @media (max-width: 620px) { .hero h1 { font-size: 42px; } }
+
+/* full-bleed payer -> escrow -> payee diagram under the CTAs */
+.hero-diagram {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-top: 64px;
+  padding: 0 24px;
+}
+.hero-diagram svg {
+  display: block;
+  width: 100%;
+  max-width: 1080px;
+  height: auto;
+  margin: 0 auto;
+}
+.dg-box { fill: var(--bg-soft); stroke: var(--line); stroke-width: 1.5; }
+.dg-box.accent { stroke: var(--accent); stroke-width: 2; }
+.dg-title {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: 0.04em;
+}
+.dg-title.accent-text { fill: var(--accent); letter-spacing: -0.01em; }
+.dg-sub { fill: var(--ink-faint); font-family: var(--mono); font-size: 12.5px; }
+.dg-flow { fill: none; stroke: var(--ink-faint); stroke-width: 1.5; }
+.dg-arrowfill { fill: var(--ink-faint); }
+.dg-label { fill: var(--ink-soft); font-family: var(--mono); font-size: 13px; }
+.dg-label-bg { fill: var(--bg); }
 .hero .lede { font-size: 19px; max-width: 60ch; margin-bottom: 34px; }
 
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
