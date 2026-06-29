@@ -358,9 +358,10 @@ footer .disclaimer {
   padding-top: 20px;
 }
 
-/* light/dark logo swap */
-.only-dark { display: none; }
+/* light/dark logo swap — !important so the toggle beats the more specific
+   `.brandmark img` / `footer img.fmark` display rules */
+.only-dark { display: none !important; }
 @media (prefers-color-scheme: dark) {
-  .only-light { display: none; }
-  .only-dark { display: block; }
+  .only-light { display: none !important; }
+  .only-dark { display: block !important; }
 }
