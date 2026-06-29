@@ -12,8 +12,8 @@
   --bg: #f5f1e8;
   --bg-soft: #efe9dd;
   --bg-code: #ece6d9;
-  --accent: #cf7a2e;
-  --accent-soft: rgba(207, 122, 46, 0.14);
+  --accent: #2f7d72;
+  --accent-soft: rgba(47, 125, 114, 0.13);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
   --serif: "Lora", Georgia, "Times New Roman", serif;
@@ -30,8 +30,8 @@
     --bg: #0a0a0b;
     --bg-soft: #111113;
     --bg-code: #141417;
-    --accent: #6d9bff;
-    --accent-soft: rgba(109, 155, 255, 0.12);
+    --accent: #5cc0b2;
+    --accent-soft: rgba(92, 192, 178, 0.14);
   }
 }
 
