@@ -16,6 +16,7 @@
   --accent-soft: rgba(47, 109, 246, 0.1);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  --serif: "Lora", Georgia, "Times New Roman", serif;
   --maxw: 880px;
 }
 
@@ -132,13 +133,15 @@ header.nav .wrap {
 .hero { padding: 96px 0 80px; text-align: left; }
 .hero .logo-payoff { width: 320px; max-width: 78%; height: auto; margin-bottom: 36px; }
 .hero h1 {
-  font-size: 40px;
-  line-height: 1.12;
-  font-weight: 680;
-  letter-spacing: -0.03em;
-  margin: 0 0 22px;
-  max-width: 16ch;
+  font-family: var(--serif);
+  font-size: 58px;
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 24px;
+  max-width: 15ch;
 }
+@media (max-width: 620px) { .hero h1 { font-size: 42px; } }
 .hero .lede { font-size: 19px; max-width: 60ch; margin-bottom: 34px; }
 
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
