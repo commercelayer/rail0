@@ -73,10 +73,11 @@ section:first-of-type { border-top: none; }
 }
 
 h2 {
-  font-size: 28px;
-  line-height: 1.2;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-family: var(--serif);
+  font-size: 32px;
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   margin: 0 0 20px;
 }
 
