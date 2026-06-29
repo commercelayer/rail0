@@ -149,9 +149,9 @@ header.nav .wrap {
 }
 @media (max-width: 620px) { .hero h1 { font-size: 42px; } }
 
-/* payer -> escrow -> payee diagram under the CTAs, within the content wrap */
-.hero-diagram { margin-top: 64px; }
-.hero-diagram img {
+/* payer -> escrow -> payee protocol diagram */
+.protocol-diagram { margin-top: 28px; }
+.protocol-diagram img {
   display: block;
   width: 100%;
   height: auto;
