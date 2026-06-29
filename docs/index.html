@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rail0 — Permissionless stablecoin payments for commerce</title>
+  <meta name="description" content="rail0 is a single immutable smart contract implementing the authorize → capture → refund lifecycle for stablecoin payments. No owner, no admin, no fees, no privileged operator." />
+  <link rel="canonical" href="https://rail0.xyz/" />
+
+  <!-- Open Graph / social -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://rail0.xyz/" />
+  <meta property="og:title" content="rail0 — Permissionless stablecoin payments for commerce" />
+  <meta property="og:description" content="The full authorize → capture → refund lifecycle for stablecoin payments in one immutable contract. Zero intermediaries, zero fees, zero privileged operators, zero permission." />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" href="assets/rail0_black.svg" media="(prefers-color-scheme: light)" />
+  <link rel="icon" href="assets/rail0_white.svg" media="(prefers-color-scheme: dark)" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brandmark" href="#top" aria-label="rail0 home">
+        <img class="only-light" src="assets/rail0_black.svg" alt="rail0" />
+        <img class="only-dark" src="assets/rail0_white.svg" alt="rail0" />
+        <span class="v">v1.1.0</span>
+      </a>
+      <nav class="nav-links">
+        <a class="hide-sm" href="#protocol">Protocol</a>
+        <a class="hide-sm" href="#chains">Chains</a>
+        <a class="hide-sm" href="#quickstart">Quickstart</a>
+        <a href="https://github.com/commercelayer/rail0">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="wrap">
+        <img class="logo-payoff only-light" src="assets/rail0_payoff_black.svg" alt="rail0 — Permissionless stablecoin payments for commerce" />
+        <img class="logo-payoff only-dark" src="assets/rail0_payoff_white.svg" alt="rail0 — Permissionless stablecoin payments for commerce" />
+        <h1>The last payment rail the new era needs.</h1>
+        <p class="lede">
+          A single immutable smart contract implementing the full
+          <strong>authorize → capture → refund</strong> lifecycle for stablecoin
+          payments — with no owner, no admin, no fees, and no privileged operator.
+          Buyer and merchant transact directly. The contract takes nothing.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/commercelayer/rail0#protocol">
+            Read the protocol
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/commercelayer/rail0">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.12-.31-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.87.12 3.18.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>
+            View source
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- THESIS -->
+    <section id="why">
+      <div class="wrap">
+        <p class="eyebrow">Why</p>
+        <h2>The internet runs on open protocols. Payments are the exception.</h2>
+        <p>
+          HTTP, DNS, SMTP — anyone can implement, run, and build on them without
+          permission. Online commerce still routes through a layered stack of
+          intermediaries — networks, processors, gateways, issuers, acquirers — each
+          taking a fee, adding latency, and reserving the right to refuse service.
+        </p>
+        <p>
+          Stablecoins changed the substrate: a dollar can move between two wallets in
+          under a second, anywhere, for fractions of a cent. <strong>But a transfer
+          alone isn't commerce.</strong> Commerce needs the primitives card networks
+          always provided — authorization, capture, refund, dispute windows — around
+          the bare movement of money. So far, the only way to get them was to plug
+          back into the legacy stack and inherit its costs.
+        </p>
+        <p>
+          <strong>rail0 is the alternative.</strong> Payment rails should be open like
+          the rest of the internet — public, immutable, and the same for everyone.
+        </p>
+      </div>
+    </section>
+
+    <!-- THE FOUR ZEROS -->
+    <section id="zeros">
+      <div class="wrap">
+        <p class="eyebrow">The zero is literal</p>
+        <h2>Four zeros between buyer and merchant.</h2>
+        <div class="zeros">
+          <div class="zero">
+            <div class="num">0</div>
+            <h3>Intermediaries</h3>
+            <p>Buyer and merchant transact peer-to-peer. The contract routes nothing to anyone else.</p>
+          </div>
+          <div class="zero">
+            <div class="num">0</div>
+            <h3>Protocol fees</h3>
+            <p>Every captured token reaches the merchant in full. The contract takes nothing.</p>
+          </div>
+          <div class="zero">
+            <div class="num">0</div>
+            <h3>Privileged operators</h3>
+            <p>No owner, no admin, no pauser, no upgrade path. The code is fixed at deploy time.</p>
+          </div>
+          <div class="zero">
+            <div class="num">0</div>
+            <h3>Permission</h3>
+            <p>Anyone can deploy the contract. Anyone can use it. No gatekeeper to ask.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIFECYCLE -->
+    <section id="protocol">
+      <div class="wrap">
+        <p class="eyebrow">The protocol</p>
+        <h2>The authorize → capture → refund lifecycle, on-chain.</h2>
+        <p>
+          A payment moves through two sequential time windows agreed up front. It opens
+          with <code>authorize</code> (escrow for later capture) or <code>charge</code>
+          (pay through immediately). The buyer signs once off-chain; the merchant submits
+          and pays gas.
+        </p>
+
+        <div class="flow">
+          <div class="flow-track">
+            <div class="node">
+              <div class="op">authorize</div>
+              <div class="who">buyer signs · merchant submits</div>
+              <p>Escrows funds in the contract for the merchant to capture later.</p>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node">
+              <div class="op">capture</div>
+              <div class="who">merchant</div>
+              <p>Pulls escrow to the merchant — partial or full, across one or more calls.</p>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node">
+              <div class="op">refund</div>
+              <div class="who">merchant signs · merchant submits</div>
+              <p>Reverses any captured portion back to the buyer until the refund deadline.</p>
+            </div>
+          </div>
+
+          <div class="branches">
+            <div class="branch">
+              <div class="op">charge</div>
+              <p>One-shot pay-through with no escrow hold — still refundable.</p>
+            </div>
+            <div class="branch">
+              <div class="op">void</div>
+              <p>Merchant cancels the hold, returning escrow to the buyer anytime.</p>
+            </div>
+            <div class="branch">
+              <div class="op">release</div>
+              <p>Buyer's safety net — recover escrow after the authorization expiry.</p>
+            </div>
+            <div class="branch">
+              <div class="op">dispute</div>
+              <p>Buyer-driven on-chain signal — a censorship-resistant record, no fund effect.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section id="how">
+      <div class="wrap">
+        <p class="eyebrow">How it works</p>
+        <h2>One signature. No allowance. No setup transaction.</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="k">01 — buyer</div>
+            <h3>Signs, never broadcasts</h3>
+            <p>
+              The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the
+              token's domain — like a signed check. Any wallet that signs typed data works:
+              no smart-account wallet, no bundler, no approval.
+            </p>
+          </div>
+          <div class="step">
+            <div class="k">02 — merchant</div>
+            <h3>Submits and pays gas</h3>
+            <p>
+              The merchant submits the transaction and absorbs the cost of acceptance — the
+              way they always have under card networks. On stablecoin-native chains, gas is
+              paid in the same asset being settled.
+            </p>
+          </div>
+          <div class="step">
+            <div class="k">03 — contract</div>
+            <h3>Binds terms to the signature</h3>
+            <p>
+              rail0 derives a deterministic EIP-3009 nonce from the exact payment terms. Tamper
+              with any field and the recovered signer won't match — the token reverts. No separate
+              intent typehash needed.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHAINS -->
+    <section id="chains">
+      <div class="wrap">
+        <p class="eyebrow">Deployments</p>
+        <h2>Any EVM chain with EIP-3009 tokens can run it.</h2>
+        <p>
+          rail0 has two hard requirements: an EVM that compiles Solidity 0.8.27, and
+          tokens exposing <code>transferWithAuthorization</code> / <code>receiveWithAuthorization</code>.
+          It's best on stablecoin-native chains with sub-second finality.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Chain</th><th>Network</th><th>Stablecoins</th><th>Status</th><th>Address</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Arc</td>
+                <td>Testnet</td>
+                <td>USDC, EURC</td>
+                <td><span class="tag live">Live</span></td>
+                <td><a href="https://testnet.arcscan.app/address/0xd9b5Be76F99EC8AE583dc1385832B2E54D406792"><code>0xd9b5…6792</code></a></td>
+              </tr>
+              <tr>
+                <td>Celo</td>
+                <td>Sepolia testnet</td>
+                <td>USDC, USDT</td>
+                <td><span class="tag live">Live</span></td>
+                <td><a href="https://celo-sepolia.blockscout.com/address/0x4CCC4DdeBB8A63B9186936A8C0FA404910A4311b"><code>0x4CCC…311b</code></a></td>
+              </tr>
+              <tr>
+                <td>Plasma</td>
+                <td>Testnet</td>
+                <td>USDT0</td>
+                <td><span class="tag">Planned</span></td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td>Tempo</td>
+                <td>—</td>
+                <td>TIP-20</td>
+                <td><span class="tag">Awaiting EIP-3009</span></td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- QUICKSTART -->
+    <section id="quickstart">
+      <div class="wrap">
+        <p class="eyebrow">Quickstart</p>
+        <h2>Authorize a payment with <code>cast</code>.</h2>
+        <p>
+          The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the token's
+          domain; the merchant submits and pays gas. In production a wallet SDK handles the
+          EIP-712 signing — here's the bare metal.
+        </p>
+        <div class="code-block">
+          <div class="code-head">
+            <span>shell</span>
+            <span>authorize</span>
+          </div>
+          <pre><span class="c"># 1. Compute the deterministic EIP-3009 nonce rail0 expects</span>
+CONFIG_HASH=$(<span class="k">cast call</span> $RAIL0 <span class="s">"hashPayment($PAYMENT_TYPE)(bytes32)"</span> <span class="s">"$PAYMENT"</span> --rpc-url $RPC)
+NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"authorizeNonce(bytes32,bytes32)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
+
+<span class="c"># 2. Buyer signs the EIP-3009 digest over the token's domain (off-chain)</span>
+<span class="c">#    validAfter = 0, validBefore = p.authorizationExpiry — pinned by rail0</span>
+SIG=$(<span class="k">cast wallet sign</span> --no-hash --private-key $PAYER_KEY $DIGEST)
+R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
+
+<span class="c"># 3. Merchant submits the transaction and pays gas</span>
+<span class="k">cast send</span> $RAIL0 <span class="s">"authorize(bytes32,$PAYMENT_TYPE,uint8,bytes32,bytes32)"</span> \
+  $PAYMENT_ID <span class="s">"$PAYMENT"</span> $V $R $S \
+  --rpc-url $RPC --private-key $PAYEE_KEY</pre>
+        </div>
+        <p class="note">
+          Full end-to-end recipes — charge, capture, void, release, refund, dispute, and
+          reading state — are in the
+          <a href="https://github.com/commercelayer/rail0#examples">README examples</a>.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="grid">
+        <div>
+          <img class="fmark only-light" src="assets/rail0_black.svg" alt="rail0" />
+          <img class="fmark only-dark" src="assets/rail0_white.svg" alt="rail0" />
+          <div class="meta">
+            Permissionless stablecoin payments for commerce.<br />
+            Version 1.1.0 · MIT licensed
+          </div>
+        </div>
+        <div class="links">
+          <a href="https://github.com/commercelayer/rail0">GitHub</a>
+          <a href="https://github.com/commercelayer/rail0#protocol">Protocol</a>
+          <a href="https://github.com/commercelayer/rail0/blob/main/LICENSE">License</a>
+        </div>
+      </div>
+      <p class="disclaimer">
+        rail0 is an immutable, permissionless protocol with no privileged roles and no
+        arbitration layer. No external audit has been performed. Review the contract and
+        assess your own risk before use.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
