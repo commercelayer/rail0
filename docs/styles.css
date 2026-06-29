@@ -53,7 +53,6 @@ body {
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  overflow-x: hidden; /* contain the full-bleed hero diagram */
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -150,19 +149,12 @@ header.nav .wrap {
 }
 @media (max-width: 620px) { .hero h1 { font-size: 42px; } }
 
-/* full-bleed payer -> escrow -> payee diagram under the CTAs */
-.hero-diagram {
-  width: 100vw;
-  margin-left: calc(50% - 50vw);
-  margin-top: 64px;
-  padding: 0 24px;
-}
+/* payer -> escrow -> payee diagram under the CTAs, within the content wrap */
+.hero-diagram { margin-top: 64px; }
 .hero-diagram img {
   display: block;
   width: 100%;
-  max-width: 1080px;
   height: auto;
-  margin: 0 auto;
 }
 .hero .lede { font-size: 19px; max-width: 60ch; margin-bottom: 34px; }
 
