@@ -178,6 +178,7 @@ header.nav .wrap {
 
 /* ---- the four zeros ---- */
 .zeros {
+  margin-top: 56px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1px;
