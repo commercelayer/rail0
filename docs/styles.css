@@ -7,13 +7,13 @@
   --ink: #1c1814;
   --ink-soft: #4a443c;
   --ink-faint: #8a8175;
-  --line: #ddd7cc;
-  --line-soft: #e8e3d8;
-  --bg: #ece7dc;
-  --bg-soft: #e4ded2;
-  --bg-code: #e1dbcd;
-  --accent: #9a6a3c;
-  --accent-soft: rgba(154, 106, 60, 0.12);
+  --line: #e6e0d4;
+  --line-soft: #efe9de;
+  --bg: #f5f1e8;
+  --bg-soft: #efe9dd;
+  --bg-code: #ece6d9;
+  --accent: #cf7a2e;
+  --accent-soft: rgba(207, 122, 46, 0.14);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
   --serif: "Lora", Georgia, "Times New Roman", serif;
@@ -37,7 +37,12 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+/* Smooth scrolling for in-page anchor clicks only. Gating on :focus-within
+   keeps it from animating the browser's scroll restoration on refresh
+   (which otherwise reads as the page drifting "up" a little on reload). */
+@media (prefers-reduced-motion: no-preference) {
+  html:focus-within { scroll-behavior: smooth; }
+}
 
 body {
   margin: 0;
