@@ -9,6 +9,7 @@
   --ink-faint: #8a8175;
   --line: #e6e0d4;
   --line-soft: #efe9de;
+  --sep: #d6cebd;
   --bg: #f5f1e8;
   --bg-soft: #efe9dd;
   --bg-code: #ece6d9;
@@ -27,6 +28,7 @@
     --ink-faint: #a1a1aa;
     --line: #27272a;
     --line-soft: #1c1c1f;
+    --sep: #34343a;
     --bg: #0a0a0b;
     --bg-soft: #111113;
     --bg-code: #141417;
@@ -65,7 +67,7 @@ a:hover { text-decoration: underline; }
 }
 
 /* ---- generic section rhythm ---- */
-section { padding: 72px 0; border-top: 1px solid var(--line-soft); }
+section { padding: 72px 0; border-top: 1px solid var(--sep); }
 section:first-of-type { border-top: none; }
 
 .eyebrow {
