@@ -292,7 +292,7 @@ header.nav .wrap {
 @media (max-width: 720px) { .steps { grid-template-columns: 1fr; gap: 28px; } }
 
 /* ---- chains table ---- */
-.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
 thead th {
   text-align: left;
@@ -303,7 +303,7 @@ thead th {
   color: var(--ink-faint);
   font-weight: 600;
   padding: 14px 18px;
-  background: var(--bg-soft);
+  background: var(--card);
   border-bottom: 1px solid var(--line);
 }
 tbody td { padding: 14px 18px; border-bottom: 1px solid var(--line-soft); color: var(--ink-soft); }

@@ -62,24 +62,6 @@
       </div>
     </section>
 
-    <!-- PROTOCOL DIAGRAM -->
-    <section id="overview">
-      <div class="wrap">
-        <p class="eyebrow">Protocol overview</p>
-        <h2>One contract, zero operators.</h2>
-        <p>
-          The buyer signs once off-chain; the merchant submits and pays gas. Funds flow
-          straight from payer to payee through the rail0 escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
-          <code>refund</code>, or <code>release</code> back to the buyer. No processor,
-          no gateway, no privileged operator in the path.
-        </p>
-        <div class="protocol-diagram">
-          <img class="dia-desktop" src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
-          <img class="dia-mobile" src="assets/rail0_protocol_mobile.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
-        </div>
-      </div>
-    </section>
-
     <!-- THE FOUR ZEROS -->
     <section id="zeros">
       <div class="wrap">
@@ -117,57 +99,20 @@
       </div>
     </section>
 
-    <!-- LIFECYCLE -->
-    <section id="protocol">
+    <!-- PROTOCOL DIAGRAM -->
+    <section id="overview">
       <div class="wrap">
-        <p class="eyebrow">The protocol</p>
-        <h2>The authorize → capture → refund lifecycle, on-chain.</h2>
+        <p class="eyebrow">Protocol overview</p>
+        <h2>One contract, zero operators.</h2>
         <p>
-          A payment moves through two sequential time windows agreed up front. It opens
-          with <code>authorize</code> (escrow for later capture) or <code>charge</code>
-          (pay through immediately). The buyer signs once off-chain; the merchant submits
-          and pays gas.
+          The buyer signs once off-chain; the merchant submits and pays gas. Funds flow
+          straight from payer to payee through the rail0 escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
+          <code>refund</code>, or <code>release</code> back to the buyer. No processor,
+          no gateway, no privileged operator in the path.
         </p>
-
-        <div class="flow">
-          <div class="flow-track">
-            <div class="node">
-              <div class="op">authorize</div>
-              <div class="who">buyer signs · merchant submits</div>
-              <p>Escrows funds in the contract for the merchant to capture later.</p>
-            </div>
-            <div class="arrow">→</div>
-            <div class="node">
-              <div class="op">capture</div>
-              <div class="who">merchant</div>
-              <p>Pulls escrow to the merchant — partial or full, across one or more calls.</p>
-            </div>
-            <div class="arrow">→</div>
-            <div class="node">
-              <div class="op">refund</div>
-              <div class="who">merchant signs · merchant submits</div>
-              <p>Reverses any captured portion back to the buyer until the refund deadline.</p>
-            </div>
-          </div>
-
-          <div class="branches">
-            <div class="branch">
-              <div class="op">charge</div>
-              <p>One-shot pay-through with no escrow hold — still refundable.</p>
-            </div>
-            <div class="branch">
-              <div class="op">void</div>
-              <p>Merchant cancels the hold, returning escrow to the buyer anytime.</p>
-            </div>
-            <div class="branch">
-              <div class="op">release</div>
-              <p>Buyer's safety net — recover escrow after the authorization expiry.</p>
-            </div>
-            <div class="branch">
-              <div class="op">dispute</div>
-              <p>Buyer-driven on-chain signal — a censorship-resistant record, no fund effect.</p>
-            </div>
-          </div>
+        <div class="protocol-diagram">
+          <img class="dia-desktop" src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
+          <img class="dia-mobile" src="assets/rail0_protocol_mobile.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
         </div>
       </div>
     </section>
@@ -176,10 +121,10 @@
     <section id="how">
       <div class="wrap">
         <p class="eyebrow">How it works</p>
-        <h2>One signature. No allowance. No setup transaction.</h2>
+        <h2>One signature. No allowance.</h2>
         <div class="steps">
           <div class="step">
-            <div class="k">01 — buyer</div>
+            <div class="k">01 — PAYER</div>
             <h3>Signs, never broadcasts</h3>
             <p>
               The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the
@@ -188,7 +133,7 @@
             </p>
           </div>
           <div class="step">
-            <div class="k">02 — merchant</div>
+            <div class="k">02 — PAYEE</div>
             <h3>Submits and pays gas</h3>
             <p>
               The merchant submits the transaction and absorbs the cost of acceptance — the
@@ -197,7 +142,7 @@
             </p>
           </div>
           <div class="step">
-            <div class="k">03 — contract</div>
+            <div class="k">03 — CONTRACT</div>
             <h3>Binds terms to the signature</h3>
             <p>
               rail0 derives a deterministic EIP-3009 nonce from the exact payment terms. Tamper
@@ -258,6 +203,7 @@
         </div>
       </div>
     </section>
+
 
     <!-- QUICKSTART -->
     <section id="quickstart">
