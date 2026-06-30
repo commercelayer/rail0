@@ -46,7 +46,7 @@
       <div class="wrap">
         <h1>Permissionless stablecoin payments for commerce.</h1>
         <p class="lede">
-          The internet runs on open protocols. Payments are the exception. Rail0 is a single immutable smart contract implementing the full
+          The internet runs on open protocols. Payments are the exception. <i>rail0</i> is a single immutable smart contract implementing the full
           <strong>authorize → capture → refund</strong> lifecycle for stablecoin
           payments — with no owner and no privileged operator.
         </p>
@@ -68,7 +68,7 @@
         <p class="eyebrow">The zero is literal</p>
         <h2>Four zeros between buyer and merchant.</h2>
         <p>
-          The zero in rail0 is not branding — it counts what the protocol removes.
+          The zero in <i>rail0</i> is not branding — it counts what the protocol removes.
           Nothing sits between the two parties, nothing is skimmed off the top, no one
           holds a key that can change the rules, and no one decides who is allowed in.
           It also marks day zero: the moment payments stop being a service rented from
@@ -106,7 +106,7 @@
         <h2>One contract, zero operators.</h2>
         <p>
           The buyer signs once off-chain; the merchant submits and pays gas. Funds flow
-          straight from payer to payee through the rail0 escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
+          straight from payer to payee through the <i>rail0</i> escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
           <code>refund</code>, or <code>release</code> back to the buyer. No processor,
           no gateway, no privileged operator in the path.
         </p>
@@ -145,7 +145,7 @@
             <div class="k">03 — CONTRACT</div>
             <h3>Binds terms to the signature</h3>
             <p>
-              rail0 derives a deterministic EIP-3009 nonce from the exact payment terms. Tamper
+              <i>rail0</i> derives a deterministic EIP-3009 nonce from the exact payment terms. Tamper
               with any field and the recovered signer won't match — the token reverts. No separate
               intent typehash needed.
             </p>
@@ -158,9 +158,9 @@
     <section id="chains">
       <div class="wrap">
         <p class="eyebrow">Deployments</p>
-        <h2>Works everywhere.</h2>
+        <h2>Works on multiple chains.</h2>
         <p>
-          rail0 is not tied to any one chain. It runs on any network that meets two hard
+          <i>rail0</i> is not tied to any one chain. It runs on any network that meets two hard
           requirements: an EVM that compiles Solidity 0.8.27, and tokens that expose the
           EIP-3009 <code>transferWithAuthorization</code> / <code>receiveWithAuthorization</code>
           entrypoints — the off-chain signatures the whole protocol is built on. That's the
@@ -263,7 +263,7 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
         </div>
       </div>
       <p class="disclaimer">
-        rail0 is a peer-to-peer protocol: buyer and merchant transact directly, with no
+        <i>rail0</i> is a peer-to-peer protocol: buyer and merchant transact directly, with no
         processor, gateway, or operator in between. The contract custodies nothing outside
         the active escrow window, takes no fee, and routes every captured token to the
         merchant in full. It is immutable and permissionless — no owner, no admin, no upgrade
