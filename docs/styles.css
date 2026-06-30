@@ -140,13 +140,14 @@ header.nav .wrap {
 .hero .logo-payoff { width: 320px; max-width: 78%; height: auto; margin-bottom: 36px; }
 .hero h1 {
   font-family: var(--serif);
-  font-size: 58px;
-  line-height: 1.08;
+  font-size: 72px;
+  line-height: 1.06;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   margin: 0 0 24px;
   max-width: 15ch;
 }
+@media (max-width: 900px) { .hero h1 { font-size: 58px; } }
 @media (max-width: 620px) { .hero h1 { font-size: 42px; } }
 
 /* payer -> escrow -> payee protocol diagram */
