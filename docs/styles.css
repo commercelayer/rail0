@@ -333,16 +333,24 @@ td code { font-size: 12.5px; }
   padding-top: 36px;
   border-top: 1px solid var(--line);
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;  /* mobile: text on top, button below */
   align-items: flex-start;
   text-align: left;
   gap: 18px;
 }
+.qs-cta .btn { flex: 0 0 auto; }
 .qs-cta p {
   margin: 0;
   font-size: 17px;
   color: var(--ink);
-  max-width: 46ch;
+  max-width: 42ch;
+}
+@media (min-width: 640px) {
+  .qs-cta {
+    flex-direction: row;           /* desktop: button left, text right */
+    align-items: center;
+    gap: 24px;
+  }
 }
 
 /* ---- code block (warm-dark terminal, fixed across themes) ---- */
