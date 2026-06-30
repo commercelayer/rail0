@@ -253,18 +253,21 @@
     <section id="quickstart">
       <div class="wrap">
         <p class="eyebrow">Quickstart</p>
-        <h2>Authorize a payment with <code>cast</code>.</h2>
+        <h2>The lifecycle in three <code>cast</code> calls.</h2>
         <p>
-          The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the token's
-          domain; the merchant submits and pays gas. In production a wallet SDK handles the
-          EIP-712 signing — here's the bare metal.
+          Authorize, capture, refund — the full path with Foundry's <code>cast</code>. In
+          production a wallet SDK handles the EIP-712 signing; here's the bare metal.
         </p>
-        <div class="code-block">
-          <div class="code-head">
-            <span>shell</span>
-            <span>authorize</span>
-          </div>
-          <pre><span class="c"># 1. Compute the deterministic EIP-3009 nonce rail0 expects</span>
+
+        <div class="qs-step">
+          <h3>1 — Authorize a payment</h3>
+          <p>The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> off-chain; the merchant submits and pays gas.</p>
+          <div class="code-block">
+            <div class="code-head">
+              <span>shell</span>
+              <span>authorize</span>
+            </div>
+            <pre><span class="c"># 1. Compute the deterministic EIP-3009 nonce rail0 expects</span>
 CONFIG_HASH=$(<span class="k">cast call</span> $RAIL0 <span class="s">"hashPayment($PAYMENT_TYPE)(bytes32)"</span> <span class="s">"$PAYMENT"</span> --rpc-url $RPC)
 NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"authorizeNonce(bytes32,bytes32)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH --rpc-url $RPC)
 
@@ -277,10 +280,48 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
 <span class="k">cast send</span> $RAIL0 <span class="s">"authorize(bytes32,$PAYMENT_TYPE,uint8,bytes32,bytes32)"</span> \
   $PAYMENT_ID <span class="s">"$PAYMENT"</span> $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY</pre>
+          </div>
         </div>
+
+        <div class="qs-step">
+          <h3>2 — Capture an authorized payment</h3>
+          <p>Merchant only. Pulls escrowed funds to the merchant before <code>authorizationExpiry</code> — partial or full, across one or more calls.</p>
+          <div class="code-block">
+            <div class="code-head">
+              <span>shell</span>
+              <span>capture</span>
+            </div>
+            <pre><span class="c"># Capture 100 USDC (6 decimals) of the escrowed authorization</span>
+<span class="k">cast send</span> $RAIL0 <span class="s">"capture(bytes32,$PAYMENT_TYPE,uint256)"</span> \
+  $PAYMENT_ID <span class="s">"$PAYMENT"</span> 100000000 \
+  --rpc-url $RPC --private-key $PAYEE_KEY</pre>
+          </div>
+        </div>
+
+        <div class="qs-step">
+          <h3>3 — Refund a captured payment</h3>
+          <p>Captured funds live in the merchant's wallet, so the merchant signs an EIP-3009 refund and submits it; the funds return to the buyer. No allowance, no <code>approve</code>.</p>
+          <div class="code-block">
+            <div class="code-head">
+              <span>shell</span>
+              <span>refund</span>
+            </div>
+            <pre><span class="c"># 1. Refund nonce for the CURRENT refundable balance (here: 50 USDC)</span>
+NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"refundNonce(bytes32,bytes32,uint120)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH 50000000 --rpc-url $RPC)
+
+<span class="c"># 2. Merchant signs the EIP-3009 digest (validBefore = p.refundExpiry)</span>
+SIG=$(<span class="k">cast wallet sign</span> --no-hash --private-key $PAYEE_KEY $DIGEST)
+R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
+
+<span class="c"># 3. Merchant submits — funds always reach $PAYER</span>
+<span class="k">cast send</span> $RAIL0 <span class="s">"refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)"</span> \
+  $PAYMENT_ID <span class="s">"$PAYMENT"</span> 50000000 $V $R $S \
+  --rpc-url $RPC --private-key $PAYEE_KEY</pre>
+          </div>
+        </div>
+
         <p class="note">
-          Full end-to-end recipes — charge, capture, void, release, refund, dispute, and
-          reading state — are in the
+          The rest — charge, void, release, dispute, and reading state — are in the
           <a href="https://github.com/commercelayer/rail0#examples">README examples</a>.
         </p>
       </div>
