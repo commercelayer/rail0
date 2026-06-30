@@ -62,6 +62,24 @@
       </div>
     </section>
 
+    <!-- PROTOCOL DIAGRAM -->
+    <section id="overview">
+      <div class="wrap">
+        <p class="eyebrow">Protocol overview</p>
+        <h2>One contract, zero operators.</h2>
+        <p>
+          The buyer signs once off-chain; the merchant submits and pays gas. Funds flow
+          straight from payer to payee through the rail0 escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
+          <code>refund</code>, or <code>release</code> back to the buyer. No processor,
+          no gateway, no privileged operator in the path.
+        </p>
+        <div class="protocol-diagram">
+          <img class="dia-desktop" src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
+          <img class="dia-mobile" src="assets/rail0_protocol_mobile.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
+        </div>
+      </div>
+    </section>
+
     <!-- THE FOUR ZEROS -->
     <section id="zeros">
       <div class="wrap">
@@ -95,24 +113,6 @@
             <h3>Permission</h3>
             <p>Anyone can deploy the contract. Anyone can use it. No gatekeeper to ask.</p>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- PROTOCOL DIAGRAM -->
-    <section id="overview">
-      <div class="wrap">
-        <p class="eyebrow">Protocol overview</p>
-        <h2>One contract, zero operators.</h2>
-        <p>
-          The buyer signs once off-chain; the merchant submits and pays gas. Funds flow
-          straight from payer to payee through the rail0 escrow — <code>authorize</code> in, <code>capture</code> out, and <code>void</code>,
-          <code>refund</code>, or <code>release</code> back to the buyer. No processor,
-          no gateway, no privileged operator in the path.
-        </p>
-        <div class="protocol-diagram">
-          <img class="dia-desktop" src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
-          <img class="dia-mobile" src="assets/rail0_protocol_mobile.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
         </div>
       </div>
     </section>
@@ -315,9 +315,14 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
         </div>
       </div>
       <p class="disclaimer">
-        rail0 is an immutable, permissionless protocol with no privileged roles and no
-        arbitration layer. No external audit has been performed. Review the contract and
-        assess your own risk before use.
+        rail0 is a peer-to-peer protocol: buyer and merchant transact directly, with no
+        processor, gateway, or operator in between. The contract custodies nothing outside
+        the active escrow window, takes no fee, and routes every captured token to the
+        merchant in full. It is immutable and permissionless — no owner, no admin, no upgrade
+        path, no privileged roles, and no arbitration layer; recourse is purely time-based
+        (capture, void, release, refund). No external audit has been completed yet — formal
+        audits are underway and their reports will be published here once available. Until
+        then, review the contract and assess your own risk before use.
       </p>
     </div>
   </footer>
