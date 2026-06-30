@@ -12,6 +12,7 @@
   --bg: #faf7f0;
   --bg-soft: #f4efe5;
   --bg-code: #f1ebe0;
+  --card: #ffffff;
   --accent: #2f7d72;
   --accent-soft: rgba(47, 125, 114, 0.13);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
@@ -30,6 +31,7 @@
     --bg: #0a0a0b;
     --bg-soft: #111113;
     --bg-code: #141417;
+    --card: #151518;
     --accent: #5cc0b2;
     --accent-soft: rgba(92, 192, 178, 0.14);
   }
@@ -195,7 +197,7 @@ header.nav .wrap {
   border-radius: 12px;
   overflow: hidden;
 }
-.zero { background: var(--bg); padding: 26px 22px; }
+.zero { background: var(--card); padding: 26px 22px; }
 .zero .num {
   font-family: var(--mono);
   font-size: 34px;
