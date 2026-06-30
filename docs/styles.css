@@ -362,6 +362,18 @@ footer .grid {
   flex-wrap: wrap;
 }
 footer img.fmark { height: 16px; width: auto; opacity: 0.8; }
+.maintained {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+.maintained:hover { text-decoration: none; color: var(--ink-soft); }
+.maintained img { height: 15px; width: 94px; display: block; }
+@media (prefers-color-scheme: dark) { .maintained img { filter: invert(1) brightness(1.7); } }
 footer .meta { font-family: var(--mono); font-size: 12.5px; color: var(--ink-faint); line-height: 1.9; }
 footer .links { display: flex; gap: 22px; font-size: 14px; }
 footer .links a { color: var(--ink-soft); }
