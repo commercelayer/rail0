@@ -362,11 +362,15 @@ footer .grid {
   flex-wrap: wrap;
 }
 footer img.fmark { height: 16px; width: auto; opacity: 0.8; }
+.footer-bottom {
+  margin-top: 24px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 22px;
+}
 .maintained {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  margin-top: 20px;
   font-family: var(--mono);
   font-size: 12.5px;
   color: var(--ink-faint);
