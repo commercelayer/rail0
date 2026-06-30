@@ -117,7 +117,7 @@ header.nav .wrap {
   height: 60px;
 }
 .brandmark { display: flex; align-items: center; gap: 9px; }
-.brandmark img { height: 18px; width: auto; display: block; }
+.brandmark img { height: 24px; width: auto; display: block; }
 .brandmark .v {
   font-family: var(--mono);
   font-size: 11px;
