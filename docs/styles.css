@@ -129,7 +129,7 @@ header.nav .wrap {
 .nav-links { display: flex; align-items: center; gap: 26px; }
 .nav-links a {
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
 }
 .nav-links a:hover { color: var(--ink); text-decoration: none; }
