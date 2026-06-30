@@ -292,7 +292,7 @@ header.nav .wrap {
 @media (max-width: 720px) { .steps { grid-template-columns: 1fr; gap: 28px; } }
 
 /* ---- chains table ---- */
-.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.table-scroll { margin-top: 56px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
 thead th {
   text-align: left;
