@@ -150,12 +150,19 @@ header.nav .wrap {
 @media (max-width: 900px) { .hero h1 { font-size: 58px; } }
 @media (max-width: 620px) { .hero h1 { font-size: 42px; } }
 
-/* payer -> escrow -> payee protocol diagram */
+/* payer -> escrow -> payee protocol diagram
+   Wide desktop artwork above the breakpoint, tall mobile redraw below. */
 .protocol-diagram { margin-top: 56px; }
 .protocol-diagram img {
   display: block;
   width: 100%;
   height: auto;
+  margin: 0 auto;
+}
+.protocol-diagram .dia-mobile { display: none; }
+@media (max-width: 640px) {
+  .protocol-diagram .dia-desktop { display: none; }
+  .protocol-diagram .dia-mobile { display: block; max-width: 420px; }
 }
 .hero .lede { font-size: 19px; max-width: 60ch; margin-bottom: 34px; }
 

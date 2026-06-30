@@ -49,7 +49,6 @@
           The internet runs on open protocols. Payments are the exception. Rail0 is a single immutable smart contract implementing the full
           <strong>authorize → capture → refund</strong> lifecycle for stablecoin
           payments — with no owner and no privileged operator.
-          Buyer and merchant transact directly. The contract takes nothing.
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/commercelayer/rail0#protocol">
@@ -112,7 +111,8 @@
           no gateway, no privileged operator in the path.
         </p>
         <div class="protocol-diagram">
-          <img src="assets/rail0_protocol.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
+          <img class="dia-desktop" src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
+          <img class="dia-mobile" src="assets/rail0_protocol_mobile.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" />
         </div>
       </div>
     </section>
@@ -305,8 +305,7 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
           <img class="fmark only-light" src="assets/rail0_black.svg" alt="rail0" />
           <img class="fmark only-dark" src="assets/rail0_white.svg" alt="rail0" />
           <div class="meta">
-            Permissionless stablecoin payments for commerce.<br />
-            Version 1.1.0 · MIT licensed
+            Permissionless stablecoin payments for commerce.
           </div>
         </div>
         <div class="links">
