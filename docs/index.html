@@ -158,11 +158,19 @@
     <section id="chains">
       <div class="wrap">
         <p class="eyebrow">Deployments</p>
-        <h2>Any EVM chain with EIP-3009 tokens can run it.</h2>
+        <h2>Works everywhere.</h2>
         <p>
-          rail0 has two hard requirements: an EVM that compiles Solidity 0.8.27, and
-          tokens exposing <code>transferWithAuthorization</code> / <code>receiveWithAuthorization</code>.
-          It's best on stablecoin-native chains with sub-second finality.
+          rail0 is not tied to any one chain. It runs on any network that meets two hard
+          requirements: an EVM that compiles Solidity 0.8.27, and tokens that expose the
+          EIP-3009 <code>transferWithAuthorization</code> / <code>receiveWithAuthorization</code>
+          entrypoints — the off-chain signatures the whole protocol is built on. That's the
+          entire bar. Anyone can deploy it, permissionlessly, wherever those conditions hold.
+        </p>
+        <p>
+          It is at its best on stablecoin-native chains with sub-second finality: there the
+          merchant pays gas in the very asset being settled, and checkout confirms instantly.
+          But neither is required — on any other EVM chain rail0 works just the same, with gas
+          simply paid in that chain's native token.
         </p>
         <div class="table-scroll">
           <table>
