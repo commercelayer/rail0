@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Why a new protocol — rail0 manifesto</title>
+  <meta name="description" content="Payment rails should be open like the rest of the internet. Why rail0 exists: a single immutable, permissionless contract for the authorize → capture → refund lifecycle of stablecoin payments." />
+  <link rel="canonical" href="https://rail0.xyz/manifesto.html" />
+
+  <!-- Open Graph / social -->
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://rail0.xyz/manifesto.html" />
+  <meta property="og:title" content="Why a new protocol — rail0 manifesto" />
+  <meta property="og:description" content="Payment rails should be open like the rest of the internet. That is the mission." />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="assets/favicon.png?v=2" />
+  <link rel="apple-touch-icon" href="assets/favicon.png?v=2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brandmark" href="index.html" aria-label="rail0 home">
+        <img class="only-light" src="assets/rail0_black.svg" alt="rail0" />
+        <img class="only-dark" src="assets/rail0_white.svg" alt="rail0" />
+        <span class="v">v1.1.0</span>
+      </a>
+      <nav class="nav-links">
+        <a class="hide-sm" href="manifesto.html">Manifesto</a>
+        <a class="hide-sm" href="index.html#overview">Protocol</a>
+        <a class="hide-sm" href="index.html#chains">Chains</a>
+        <a class="hide-sm" href="index.html#quickstart">Quickstart</a>
+        <a href="https://github.com/commercelayer/rail0">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- MANIFESTO -->
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">Manifesto</p>
+        <h1>Payment rails should be open.</h1>
+
+        <div class="manifesto">
+          <p class="lead">
+            The internet runs on open protocols — HTTP, DNS, SMTP — that anyone can
+            implement, run, and build on without permission. Payments are the conspicuous
+            exception. Online commerce still routes through a layered stack of intermediaries
+            — networks, processors, gateways, issuers, acquirers — each taking a fee, adding
+            latency, and reserving the right to refuse service. Cross-border settlement is
+            slow and expensive. Refunds and disputes happen off-rail. Programmable money,
+            twenty years into the API economy, is still mostly marketing.
+          </p>
+          <p>
+            Stablecoins changed the substrate. A dollar can move between two wallets in under
+            a second, anywhere in the world, for fractions of a cent, without anyone's
+            permission. But a transfer alone isn't commerce. Commerce needs the primitives
+            card networks have always provided — authorization, capture, refund, dispute
+            windows — around the bare movement of money. So far, the only way to get those
+            primitives has been to plug back into the legacy stack and inherit its costs.
+          </p>
+          <p>
+            <i>rail0</i> is the alternative: a single immutable contract that implements the
+            full <strong>authorize → capture → refund</strong> lifecycle for stablecoin
+            payments, with no owner, no admin, no fee, and no privileged operator. Buyer and
+            merchant transact directly. A payment takes one off-chain signature — the buyer
+            signs an EIP-3009 authorization, the merchant submits the transaction and pays
+            gas. No allowance, no smart-account wallet, no bundler, nothing broadcast to set
+            it up. It accepts any EIP-3009-capable stablecoin, runs on any EVM-compatible
+            chain, and adds nothing between buyer and merchant beyond the rules of the
+            contract itself — rules that are public, immutable, and the same for everyone.
+          </p>
+          <p>
+            The zero in <i>rail0</i> is literal: zero intermediaries, zero protocol fees,
+            zero privileged operators, zero permission required to deploy or to use. It also
+            marks day zero — the moment payments stop being a service rented from someone
+            else's network and become a commodity protocol the way HTTP is.
+          </p>
+          <p>
+            Payment rails should be open like the rest of the internet. That is the mission.
+            If we get this right, <i>rail0</i> is the last payment rail the new era needs.
+          </p>
+
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/commercelayer/rail0">
+              Start building →
+            </a>
+            <a class="btn btn-ghost" href="index.html">
+              Back to overview
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="grid">
+        <div>
+          <img class="fmark only-light" src="assets/rail0_black.svg" alt="rail0" />
+          <img class="fmark only-dark" src="assets/rail0_white.svg" alt="rail0" />
+          <div class="meta">
+            Permissionless stablecoin payments for commerce.
+          </div>
+        </div>
+        <div class="links">
+          <a href="https://github.com/commercelayer/rail0/blob/main/LICENSE">MIT License</a>
+        </div>
+      </div>
+      <p class="disclaimer">
+        <i>rail0</i> is a peer-to-peer protocol: buyer and merchant transact directly, with no
+        processor, gateway, or operator in between. The contract custodies nothing outside
+        the active escrow window, takes no fee, and routes every captured token to the
+        merchant in full. It is immutable and permissionless — no owner, no admin, no upgrade
+        path, no privileged roles, and no arbitration layer; recourse is purely time-based
+        (capture, void, release, refund). No external audit has been completed yet — formal
+        audits are underway and their reports will be published here once available. Until
+        then, review the contract and assess your own risk before use.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
