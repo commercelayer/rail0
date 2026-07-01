@@ -1,24 +1,19 @@
-<div align="center">
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/rail0_payoff_white.svg">
   <img src="docs/assets/rail0_payoff_black.svg" alt="rail0 — Permissionless stablecoin payments for commerce" width="420">
 </picture>
-
-**Permissionless stablecoin payments for commerce.**
 
 A single immutable smart contract implementing the full **authorize → capture → refund**
 lifecycle for stablecoin payments — no owner, no admin, no fees, no privileged operator.
 
 [**rail0.xyz**](https://rail0.xyz) · [Protocol](#protocol) · [Examples](#examples) · [Development](#development)
 
-</div>
-
 ---
 
-This README is the technical reference. For the project overview and rationale, see [**rail0.xyz**](https://rail0.xyz).
-
 _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) transact directly, with no processor, gateway, or operator in between. The contract custodies nothing outside the active escrow window, takes no fee, and routes every captured token to the merchant in full. It is immutable and permissionless — anyone can deploy it, anyone can use it. Buyer-funded operations need a single off-chain signature (an **EIP-3009 `TransferWithAuthorization`**); the merchant submits the transaction and pays gas. No allowance, no separate intent typehash, no smart-account wallet, no bundler.
+
+<br>
+<br>
 
 <div align="center">
   <img src="docs/assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" width="760">
