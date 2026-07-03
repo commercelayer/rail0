@@ -264,28 +264,35 @@ header.nav .wrap {
   white-space: nowrap;
 }
 .ticker-track li.live { color: var(--ink); }
-.ticker-track .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--ink-faint);
-  opacity: 0.5;
+/* Chain logos rendered as CSS masks so a single silhouette tints to the theme:
+   muted ink for planned chains, the teal accent for the live ones. Source SVGs
+   are the MIT-licensed web3icons monochrome set (assets/chains/). */
+.ticker-track .logo {
+  width: 16px;
+  height: 16px;
   flex: none;
+  background-color: var(--ink-faint);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
-.ticker-track li.live .dot {
-  background: var(--accent);
-  opacity: 1;
-  animation: ticker-pulse 2.4s ease-out infinite;
-}
+.ticker-track li.live .logo { background-color: var(--accent); }
+.logo-arbitrum { -webkit-mask-image: url(assets/chains/arbitrum.svg); mask-image: url(assets/chains/arbitrum.svg); }
+.logo-arc { -webkit-mask-image: url(assets/chains/arc.svg); mask-image: url(assets/chains/arc.svg); }
+.logo-avalanche { -webkit-mask-image: url(assets/chains/avalanche.svg); mask-image: url(assets/chains/avalanche.svg); }
+.logo-base { -webkit-mask-image: url(assets/chains/base.svg); mask-image: url(assets/chains/base.svg); }
+.logo-celo { -webkit-mask-image: url(assets/chains/celo.svg); mask-image: url(assets/chains/celo.svg); }
+.logo-ethereum { -webkit-mask-image: url(assets/chains/ethereum.svg); mask-image: url(assets/chains/ethereum.svg); }
+.logo-optimism { -webkit-mask-image: url(assets/chains/optimism.svg); mask-image: url(assets/chains/optimism.svg); }
+.logo-plasma { -webkit-mask-image: url(assets/chains/plasma.svg); mask-image: url(assets/chains/plasma.svg); }
+.logo-polygon { -webkit-mask-image: url(assets/chains/polygon.svg); mask-image: url(assets/chains/polygon.svg); }
+.logo-tempo { -webkit-mask-image: url(assets/chains/tempo.svg); mask-image: url(assets/chains/tempo.svg); }
 @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@keyframes ticker-pulse {
-  0% { box-shadow: 0 0 0 0 var(--accent-soft); }
-  70% { box-shadow: 0 0 0 7px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
 @media (prefers-reduced-motion: reduce) {
   .ticker { animation: none; }
-  .ticker-track li.live .dot { animation: none; }
 }
 
 /* ---- the four zeros ---- */
