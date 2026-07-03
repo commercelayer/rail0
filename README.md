@@ -39,15 +39,15 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 
 | Chain     | Network         | Stablecoin(s) | Status            | _rail0_ address |
 |-----------|-----------------|---------------|-------------------|-----------------|
+| Arbitrum  | Mainnet         | USDC          | Planned           | — |
 | Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x58E1…2De2`](https://testnet.arcscan.app/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
+| Avalanche | Mainnet         | USDC, EURC    | Planned           | — |
+| Base      | Mainnet         | USDC, EURC    | Planned           | — |
 | Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0xd9b5…6792`](https://celo-sepolia.blockscout.com/address/0xd9b5Be76F99EC8AE583dc1385832B2E54D406792) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | — |
-| Base      | Mainnet         | USDC, EURC    | Planned           | — |
-| Arbitrum  | Mainnet         | USDC          | Planned           | — |
 | Optimism  | Mainnet         | USDC          | Planned           | — |
-| Polygon   | Mainnet         | USDC          | Planned           | — |
-| Avalanche | Mainnet         | USDC, EURC    | Planned           | — |
 | Plasma    | Testnet         | USDT0         | Planned           | — |
+| Polygon   | Mainnet         | USDC          | Planned           | — |
 | Tempo     | —               | TIP-20        | Awaiting EIP-3009 | — |
 
 Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
