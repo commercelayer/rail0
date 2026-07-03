@@ -56,7 +56,7 @@ Integrators should pin the _rail0_ address per chain and not assume cross-deploy
 
 A payment moves through two sequential time windows defined by the configuration the buyer and merchant agree on up front. It is opened with either `authorize` (escrow funds for later capture) or `charge` (pay through immediately, no hold) — the buyer signs the intent off-chain and the merchant submits.
 
-- Until **`authorizationExpiry`**, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or `void` the hold and return it to the buyer.
+- Until **`authorizationExpiry`**, the merchant can `capture` the escrowed funds — partially or in full, across one or more calls — or, while nothing has been captured yet, `void` the hold and return it to the buyer.
 - After **`authorizationExpiry`**, either the payer or the payee may submit `release` to return the remaining escrow to the buyer.
 - Until **`refundExpiry`**, the merchant can `refund` any captured portion back to the buyer.
 - While the refund window is open, the buyer can raise a `dispute` against captured funds — a signal-only open/close record that moves no money.
@@ -73,7 +73,7 @@ function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, by
 
 Buyer escrows `p.amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order and not in the past, addresses non-zero, token allowlisted), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce and pinned validity window. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` at any time; otherwise `release` opens after `authorizationExpiry`.
+The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order and not in the past, addresses non-zero, token allowlisted), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce and pinned validity window. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` the hold — but only while nothing has been captured yet; otherwise `release` opens after `authorizationExpiry`.
 
 #### Charge
 
@@ -103,7 +103,7 @@ function void(bytes32 paymentId, Payment calldata p) external;
 
 Merchant cancels the authorization, returning all currently-escrowed funds to the buyer.
 
-Only `p.payee` may call. No deadline — the merchant can void any time `capturableAmount > 0`. The entire remaining escrow is sent back to the buyer in a single `transfer` and `capturableAmount` is zeroed. Voiding has no effect on `refundableAmount`.
+Only `p.payee` may call, and only while the authorization is fully intact — **no amount has been captured yet** (`capturableAmount == p.amount`). There is no deadline within that constraint. The entire escrow is sent back to the buyer in a single `transfer` call, and `capturableAmount` is zeroed. Once any (even partial) capture has occurred, void reverts `AlreadyCaptured` — a partly-captured authorization can no longer be cancelled, and the buyer recovers the uncaptured remainder via `release` after `authorizationExpiry` instead. `void` reverts `NothingToVoid` when there is no escrow at all. Typical use: order rejected, fraud detected, or fulfillment canceled before any capture happened.
 
 #### Release
 
@@ -175,7 +175,7 @@ A `TokenAccepted(address indexed token)` event is emitted from the constructor f
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.1.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -240,6 +240,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `InvalidCaptureAmount`      | `amount == 0` or `amount > capturableAmount`.                      |
 | `InvalidRefundAmount`       | `amount == 0` or `amount > refundableAmount`.                      |
 | `NothingToVoid`             | `void` called with `capturableAmount == 0`.                        |
+| `AlreadyCaptured`           | `void` called after any (even partial) capture (`capturableAmount != p.amount`). |
 | `NothingToRelease`          | `release` called with `capturableAmount == 0`.                     |
 | `NothingToDispute`          | `dispute` called with `refundableAmount == 0`.                     |
 | `AlreadyDisputed`           | `dispute` called while a dispute is already open.                 |
@@ -256,11 +257,11 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 - **Reentrancy guard.** Every entrypoint that makes an external token call (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) is `nonReentrant`. `dispute`/`closeDispute` make no external calls and hold no guard by design — the only fund-moving dispute path is the full-refund auto-close, which executes inside `refund`'s effects phase, already under its guard and ahead of any transfer.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers; even if the reentrancy guard were bypassed (it can't be), CEI ordering already prevents same-payment double-spending.
 - **SafeERC20-style transfers.** `_safeTransfer` accepts both bool-returning and non-returning ERC-20s and reverts with `TransferFailed` on any failure (compatible with USDT-mainnet-style tokens). Inbound pulls use EIP-3009, which revert token-side on an invalid signature.
-- **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g. USDC blacklist) after authorization, `capture` reverts, but the buyer's escrow is not stuck: `void` (anytime, by the merchant) and `release` (after `authorizationExpiry`, by payer or payee) send funds directly to the buyer.
+- **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g. USDC blacklist) after authorization, `capture` reverts, but the buyer's escrow is not stuck: `void` (by the merchant, only while nothing has been captured) and `release` (after `authorizationExpiry`, by payer or payee) send funds directly to the buyer — `release` covers the partly-captured case where `void` is no longer available.
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound and is the `validBefore` pinned into the merchant's refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature). Best practice is bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not far-future `refundExpiry`.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Disputes are signal, not arbitration.** The protocol has no arbitration layer: the only on-chain mechanisms that move funds back to the buyer are `release` (uncaptured escrow, after `authorizationExpiry`) and the merchant's discretionary `refund`. The `dispute` lifecycle adds a censorship-resistant record with **no fund effect**. Because a dispute carries no financial payoff, friendly-fraud abuse is structurally neutralized on-chain; detection and reaction belong off-chain.
-- **Test coverage.** A 99-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path, submitter-authorization gates, the dispute open/close lifecycle, EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification, `_safeTransfer` failure handling, boundary conditions, and reentrancy attempts via a malicious mock token. **No external audit has been completed yet — formal audits are underway and reports will be published once available.**
+- **Test coverage.** A 100-test Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path (incl. `AlreadyCaptured` on `void` after a capture), submitter-authorization gates, the dispute open/close lifecycle, EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification, `_safeTransfer` failure handling, boundary conditions, and reentrancy attempts via a malicious mock token. **No external audit has been completed yet — formal audits are underway and reports will be published once available.**
 
 ### Limits
 
@@ -381,7 +382,7 @@ cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
 ### Void / Release
 
 ```sh
-# Void — merchant returns all currently-escrowed funds to the buyer (no deadline)
+# Void — merchant returns the full escrow to the buyer; allowed only while nothing has been captured yet (else reverts AlreadyCaptured — use release instead)
 cast send $RAIL0 "void(bytes32,$PAYMENT_TYPE)" \
   $PAYMENT_ID "$PAYMENT" --rpc-url $RPC --private-key $PAYEE_KEY
 
