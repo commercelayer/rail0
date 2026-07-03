@@ -138,6 +138,7 @@ header.nav .wrap {
   height: 60px;
 }
 .brandmark { display: flex; align-items: center; gap: 9px; }
+.brandmark-home { display: inline-flex; align-items: center; }
 .brandmark img { height: 24px; width: auto; display: block; }
 .brandmark .v {
   font-family: var(--mono);
@@ -146,7 +147,10 @@ header.nav .wrap {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 1px 7px;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
+.brandmark a.v:hover { color: var(--ink); border-color: var(--ink-faint); text-decoration: none; }
 .nav-links { display: flex; align-items: center; gap: 26px; }
 .nav-links a {
   color: var(--ink-soft);
