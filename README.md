@@ -40,7 +40,6 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Chain     | Network         | Stablecoin(s) | Status            | _rail0_ address |
 |-----------|-----------------|---------------|-------------------|-----------------|
 | Arc       | Testnet         | USDC, EURC    | **Live**          | [`0xd9b5…6792`](https://testnet.arcscan.app/address/0xd9b5Be76F99EC8AE583dc1385832B2E54D406792) |
-| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0x4CCC…311b`](https://celo-sepolia.blockscout.com/address/0x4CCC4DdeBB8A63B9186936A8C0FA404910A4311b) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | — |
 | Base      | Mainnet         | USDC, EURC    | Planned           | — |
 | Arbitrum  | Mainnet         | USDC          | Planned           | — |
