@@ -18,7 +18,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "1.1.0";
+    string public constant VERSION = "1.2.0";
 
     /// @dev Reason emitted on the `DisputeClosed` event when a dispute is closed
     ///      automatically by a full refund (one that brings `refundableAmount` to 0).
@@ -180,6 +180,7 @@ contract RAIL0 {
     error InvalidCaptureAmount();
     error InvalidRefundAmount();
     error NothingToVoid();
+    error AlreadyCaptured();
     error NothingToRelease();
     error TokenNotAccepted();
     error DuplicateToken();
@@ -339,10 +340,19 @@ contract RAIL0 {
     }
 
     /// @notice Cancel an authorization, returning held funds to the buyer.
+    /// @dev    Only permitted while the authorization is fully intact — no amount
+    ///         has been captured. Once any (even partial) capture has occurred,
+    ///         `capturableAmount < p.amount` and void reverts with `AlreadyCaptured`;
+    ///         the buyer recovers the uncaptured remainder via `release` after
+    ///         `authorizationExpiry`. `capturableAmount` only ever decreases (via
+    ///         capture) from its initial `p.amount`, so `== p.amount` is an exact
+    ///         "nothing captured yet" test — a refund reduces `refundableAmount`,
+    ///         never restoring `capturableAmount`.
     function void(bytes32 paymentId, Payment calldata p) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         PaymentState memory s = _loadAndVerify(paymentId, p);
         if (s.capturableAmount == 0) revert NothingToVoid();
+        if (s.capturableAmount != p.amount) revert AlreadyCaptured();
 
         uint120 amount = s.capturableAmount;
         _state[paymentId].capturableAmount = 0;

@@ -794,17 +794,39 @@ contract RAIL0Test is Test {
         rail0.void(PAYMENT_ID, p);
     }
 
-    function test_Void_AfterPartialCapture_VoidsRemaining() public {
+    function test_Void_RevertsAfterPartialCapture() public {
         RAIL0.Payment memory p = _payment();
         _authorize(PAYMENT_ID, p);
 
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 30e6);
 
-        // Void should release the remaining 70e6 to buyer; refundable stays at 30e6.
-        uint256 balBefore = token.balanceOf(payer);
+        // Once any amount is captured the authorization is no longer intact, so
+        // void is forbidden — the merchant can't cancel a partly-captured payment.
+        // The buyer recovers the uncaptured 70e6 via release after expiry instead.
         vm.prank(payee);
+        vm.expectRevert(RAIL0.AlreadyCaptured.selector);
         rail0.void(PAYMENT_ID, p);
+
+        // State is untouched: escrow and captured funds both remain as they were.
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(s.capturableAmount, 70e6);
+        assertEq(s.refundableAmount, 30e6);
+    }
+
+    // The uncaptured remainder after a partial capture is recovered via release
+    // (once the authorization window closes), since void is no longer available.
+    function test_Release_RecoversRemainderAfterPartialCapture() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 30e6);
+
+        vm.warp(authorizationExpiry);
+        uint256 balBefore = token.balanceOf(payer);
+        vm.prank(payer);
+        rail0.release(PAYMENT_ID, p);
 
         assertEq(token.balanceOf(payer), balBefore + 70e6);
         RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
