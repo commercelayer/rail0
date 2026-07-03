@@ -21,8 +21,14 @@
   --maxw: 880px;
 }
 
+/* Dark palette. Two blocks carry identical declarations because a media query
+   and an attribute selector can't be merged into one rule in plain CSS:
+   - the media block applies the OS preference, but backs off when the footer
+     toggle has forced light (`[data-theme="light"]`);
+   - the attribute block applies when the toggle has forced dark, regardless of
+     OS preference. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink: #fafafa;
     --ink-soft: #d4d4d8;
     --ink-faint: #a1a1aa;
@@ -35,6 +41,19 @@
     --accent: #5cc0b2;
     --accent-soft: rgba(92, 192, 178, 0.14);
   }
+}
+:root[data-theme="dark"] {
+  --ink: #fafafa;
+  --ink-soft: #d4d4d8;
+  --ink-faint: #a1a1aa;
+  --line: #27272a;
+  --line-soft: #1c1c1f;
+  --bg: #0a0a0b;
+  --bg-soft: #111113;
+  --bg-code: #141417;
+  --card: #151518;
+  --accent: #5cc0b2;
+  --accent-soft: rgba(92, 192, 178, 0.14);
 }
 
 * { box-sizing: border-box; }
@@ -172,10 +191,26 @@ header.nav .wrap {
   height: auto;
   margin: 0 auto;
 }
+/* Two axes: desktop/mobile artwork (viewport) and light/dark artwork (theme).
+   The dark SVGs are recoloured to match the .zero feature cards (card fill,
+   line border, light text). Default (light theme, desktop) shows only the
+   desktop-light image; the rules below swap in the right one per state. */
+.protocol-diagram .dia-dark { display: none; }
 .protocol-diagram .dia-mobile { display: none; }
+:root[data-theme="dark"] .protocol-diagram .dia-desktop.dia-light { display: none; }
+:root[data-theme="dark"] .protocol-diagram .dia-desktop.dia-dark { display: block; }
 @media (max-width: 640px) {
   .protocol-diagram .dia-desktop { display: none; }
-  .protocol-diagram .dia-mobile { display: block; max-width: 420px; }
+  .protocol-diagram .dia-mobile.dia-light { display: block; max-width: 420px; margin: 0 auto; }
+  :root[data-theme="dark"] .protocol-diagram .dia-desktop.dia-dark { display: none; }
+  :root[data-theme="dark"] .protocol-diagram .dia-mobile.dia-light { display: none; }
+  :root[data-theme="dark"] .protocol-diagram .dia-mobile.dia-dark { display: block; max-width: 420px; margin: 0 auto; }
+}
+/* No-JS fallback: OS dark with no resolved data-theme keeps the light artwork,
+   so invert it rather than leave black-on-black. The inline <head> script sets
+   data-theme for everyone, so JS-enabled visitors get the recoloured SVG. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .protocol-diagram img { filter: invert(1) hue-rotate(180deg); }
 }
 .hero .lede { font-size: 19px; max-width: 60ch; margin-bottom: 34px; }
 
@@ -330,7 +365,8 @@ td code { font-size: 12.5px; }
   color: var(--ink-faint);
 }
 .tag.live { color: #0f8a3d; border-color: rgba(15, 138, 61, 0.35); }
-@media (prefers-color-scheme: dark) { .tag.live { color: #4ade80; border-color: rgba(74, 222, 128, 0.3); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tag.live { color: #4ade80; border-color: rgba(74, 222, 128, 0.3); } }
+:root[data-theme="dark"] .tag.live { color: #4ade80; border-color: rgba(74, 222, 128, 0.3); }
 
 /* ---- quickstart steps ---- */
 .qs-step { margin-top: 44px; }
@@ -412,9 +448,9 @@ footer .grid {
   gap: 24px;
   flex-wrap: wrap;
 }
-footer img.fmark { height: 16px; width: auto; opacity: 0.8; }
-footer .meta { font-family: var(--mono); font-size: 12.5px; color: var(--ink-faint); line-height: 1.9; }
-footer .links { display: flex; gap: 22px; font-size: 14px; }
+footer img.fmark { display: block; height: 16px; width: auto; opacity: 0.8; margin-bottom: 8px; }
+footer .meta { font-family: var(--mono); font-size: 12.5px; color: var(--ink-faint); line-height: 1.6; }
+footer .links { display: flex; align-items: center; gap: 22px; font-size: 14px; }
 footer .links a { color: var(--ink-soft); }
 footer .disclaimer {
   margin-top: 28px;
@@ -424,10 +460,48 @@ footer .disclaimer {
   padding-top: 20px;
 }
 
-/* light/dark logo swap — !important so the toggle beats the more specific
-   `.brandmark img` / `footer img.fmark` display rules */
+/* light/dark logo swap — mirrors the palette resolution above. !important so
+   the display flip beats the more specific `.brandmark img` / `footer img.fmark`
+   rules. The shown image keeps its natural display; forcing light needs no rule
+   because the base already hides `.only-dark` and the media block backs off. */
 .only-dark { display: none !important; }
 @media (prefers-color-scheme: dark) {
-  .only-light { display: none !important; }
-  .only-dark { display: block !important; }
+  :root:not([data-theme="light"]) .only-light { display: none !important; }
+  :root:not([data-theme="light"]) .only-dark { display: block !important; }
 }
+:root[data-theme="dark"] .only-light { display: none !important; }
+:root[data-theme="dark"] .only-dark { display: block !important; }
+
+/* ---- theme toggle (footer) ---- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  line-height: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.theme-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 15px; height: 15px; display: block; }
+.theme-toggle .icon-moon { display: none; }
+.theme-toggle[data-theme="dark"] .icon-sun { display: none; }
+.theme-toggle[data-theme="dark"] .icon-moon { display: block; }
+
+/* Re-cool the warm terminal panel in dark mode so it reads as a crisp elevated
+   surface on the near-black page instead of a muddy brown patch. Media block
+   for OS dark (unless forced light); attribute block for the toggle forcing
+   dark. (The protocol-diagram dark handling lives with its base rules above.) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .code-block { background: #131316; border-color: #26262a; }
+  :root:not([data-theme="light"]) .code-head { border-bottom-color: #26262a; }
+}
+:root[data-theme="dark"] .code-block { background: #131316; border-color: #26262a; }
+:root[data-theme="dark"] .code-head { border-bottom-color: #26262a; }
