@@ -248,6 +248,11 @@ header.nav .wrap {
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
 }
+/* The whole ticker is a shortcut to the chains table: pointer cursor, and it
+   pauses while hovered so the target is easy to click. */
+.ticker-link { display: block; text-decoration: none; color: inherit; cursor: pointer; }
+.ticker-link:hover { text-decoration: none; }
+.chains-ticker:hover .ticker { animation-play-state: paused; }
 .ticker { display: flex; width: max-content; animation: ticker 45s linear infinite; }
 .ticker-track { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; }
 .ticker-track li {
@@ -261,12 +266,10 @@ header.nav .wrap {
   color: var(--ink-soft);
   white-space: nowrap;
 }
-.ticker-track li.live { color: var(--ink); }
 /* Chain marks are inline SVGs with fill="currentColor" (robust everywhere,
-   including file://), tinted via color: muted ink for planned chains, the teal
-   accent for the live ones. Source: MIT-licensed web3icons monochrome set. */
-.ticker-track .logo { width: 16px; height: 16px; flex: none; color: var(--ink-faint); }
-.ticker-track li.live .logo { color: var(--accent); }
+   including file://), uniformly tinted to a muted ink so every chain reads the
+   same. Source: MIT-licensed web3icons monochrome set. */
+.ticker-track .logo { width: 20px; height: 20px; flex: none; color: var(--ink-faint); }
 @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) {
   .ticker { animation: none; }
