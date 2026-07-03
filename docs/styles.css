@@ -29,9 +29,9 @@
      OS preference. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ink: #fafafa;
-    --ink-soft: #d4d4d8;
-    --ink-faint: #a1a1aa;
+    --ink: #f6f4ee;
+    --ink-soft: #d2cfc8;
+    --ink-faint: #a09b90;
     --line: #27272a;
     --line-soft: #1c1c1f;
     --bg: #0a0a0b;
@@ -43,9 +43,9 @@
   }
 }
 :root[data-theme="dark"] {
-  --ink: #fafafa;
-  --ink-soft: #d4d4d8;
-  --ink-faint: #a1a1aa;
+  --ink: #f6f4ee;
+  --ink-soft: #d2cfc8;
+  --ink-faint: #a09b90;
   --line: #27272a;
   --line-soft: #1c1c1f;
   --bg: #0a0a0b;
