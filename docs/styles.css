@@ -240,13 +240,14 @@ header.nav .wrap {
    Full-width marquee between the hero and the four zeros. Two identical tracks
    sit side by side inside .ticker (total width = 2× one track); translating the
    pair by -50% scrolls exactly one track width, so the loop is seamless. */
-.chains-ticker {
-  padding: 22px 0;
+.chains-ticker { padding: 26px 0; }
+.chains-ticker .ticker-mask {
+  overflow: hidden;
+  padding: 14px 0;
   border-top: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
 }
 .ticker { display: flex; width: max-content; animation: ticker 45s linear infinite; }
 .chains-ticker:hover .ticker { animation-play-state: paused; }
