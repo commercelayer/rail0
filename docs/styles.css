@@ -231,11 +231,6 @@ header.nav .wrap {
 .btn-primary { background: var(--ink); color: var(--bg); }
 .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
 .btn svg { width: 16px; height: 16px; }
-/* Soften the primary CTA from a stark pure white to a warm stone in dark mode. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .btn-primary { background: #e9e6e0; border-color: #e9e6e0; }
-}
-:root[data-theme="dark"] .btn-primary { background: #e9e6e0; border-color: #e9e6e0; }
 
 /* ---- the four zeros ---- */
 .zeros {
