@@ -3,6 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Resolve the theme before first paint to avoid a flash: a saved choice if
+       there is one, otherwise the OS preference. Setting data-theme for everyone
+       keeps the palette and the footer toggle in sync across pages. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("rail0-theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
   <title>Why a new protocol — rail0 manifesto</title>
   <meta name="description" content="Payment rails should be open like the rest of the internet. Why rail0 exists: a single immutable, permissionless contract for the authorize → capture → refund lifecycle of stablecoin payments." />
   <link rel="canonical" href="https://rail0.xyz/manifesto.html" />
@@ -120,6 +134,10 @@
         </div>
         <div class="links">
           <a href="https://github.com/commercelayer/rail0/blob/main/LICENSE">MIT License</a>
+          <button class="theme-toggle" type="button" aria-label="Switch color theme">
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
         </div>
       </div>
       <p class="disclaimer">
@@ -134,6 +152,38 @@
       </p>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.querySelector(".theme-toggle");
+      if (!btn) return;
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      function stored() {
+        try { return localStorage.getItem("rail0-theme"); } catch (e) { return null; }
+      }
+      function effective() {
+        var s = stored();
+        return s === "light" || s === "dark" ? s : (mq.matches ? "dark" : "light");
+      }
+      function render() {
+        var t = effective();
+        btn.dataset.theme = t;
+        btn.setAttribute("aria-label", "Switch to " + (t === "dark" ? "light" : "dark") + " theme");
+      }
+      btn.addEventListener("click", function () {
+        var next = effective() === "dark" ? "light" : "dark";
+        try { localStorage.setItem("rail0-theme", next); } catch (e) {}
+        root.dataset.theme = next;
+        render();
+      });
+      // Follow live OS changes for visitors who haven't chosen explicitly.
+      mq.addEventListener("change", function () {
+        if (!stored()) { root.dataset.theme = mq.matches ? "dark" : "light"; render(); }
+      });
+      render();
+    })();
+  </script>
 
 </body>
 </html>
