@@ -240,12 +240,11 @@ header.nav .wrap {
    Full-width marquee between the hero and the four zeros. Two identical tracks
    sit side by side inside .ticker (total width = 2× one track); translating the
    pair by -50% scrolls exactly one track width, so the loop is seamless. */
-.chains-ticker { padding: 26px 0; }
+/* Top/bottom dividers come from the global `section` border-top on this section
+   and on the following one — no extra borders here, or they double up. */
+.chains-ticker { padding: 20px 0; overflow: hidden; }
 .chains-ticker .ticker-mask {
   overflow: hidden;
-  padding: 14px 0;
-  border-top: 1px solid var(--line-soft);
-  border-bottom: 1px solid var(--line-soft);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
 }
@@ -264,32 +263,11 @@ header.nav .wrap {
   white-space: nowrap;
 }
 .ticker-track li.live { color: var(--ink); }
-/* Chain logos rendered as CSS masks so a single silhouette tints to the theme:
-   muted ink for planned chains, the teal accent for the live ones. Source SVGs
-   are the MIT-licensed web3icons monochrome set (assets/chains/). */
-.ticker-track .logo {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  background-color: var(--ink-faint);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-}
-.ticker-track li.live .logo { background-color: var(--accent); }
-.logo-arbitrum { -webkit-mask-image: url(assets/chains/arbitrum.svg); mask-image: url(assets/chains/arbitrum.svg); }
-.logo-arc { -webkit-mask-image: url(assets/chains/arc.svg); mask-image: url(assets/chains/arc.svg); }
-.logo-avalanche { -webkit-mask-image: url(assets/chains/avalanche.svg); mask-image: url(assets/chains/avalanche.svg); }
-.logo-base { -webkit-mask-image: url(assets/chains/base.svg); mask-image: url(assets/chains/base.svg); }
-.logo-celo { -webkit-mask-image: url(assets/chains/celo.svg); mask-image: url(assets/chains/celo.svg); }
-.logo-ethereum { -webkit-mask-image: url(assets/chains/ethereum.svg); mask-image: url(assets/chains/ethereum.svg); }
-.logo-optimism { -webkit-mask-image: url(assets/chains/optimism.svg); mask-image: url(assets/chains/optimism.svg); }
-.logo-plasma { -webkit-mask-image: url(assets/chains/plasma.svg); mask-image: url(assets/chains/plasma.svg); }
-.logo-polygon { -webkit-mask-image: url(assets/chains/polygon.svg); mask-image: url(assets/chains/polygon.svg); }
-.logo-tempo { -webkit-mask-image: url(assets/chains/tempo.svg); mask-image: url(assets/chains/tempo.svg); }
+/* Chain marks are inline SVGs with fill="currentColor" (robust everywhere,
+   including file://), tinted via color: muted ink for planned chains, the teal
+   accent for the live ones. Source: MIT-licensed web3icons monochrome set. */
+.ticker-track .logo { width: 16px; height: 16px; flex: none; color: var(--ink-faint); }
+.ticker-track li.live .logo { color: var(--accent); }
 @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) {
   .ticker { animation: none; }
