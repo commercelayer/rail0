@@ -249,7 +249,6 @@ header.nav .wrap {
   mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
 }
 .ticker { display: flex; width: max-content; animation: ticker 45s linear infinite; }
-.chains-ticker:hover .ticker { animation-play-state: paused; }
 .ticker-track { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; }
 .ticker-track li {
   display: flex;
