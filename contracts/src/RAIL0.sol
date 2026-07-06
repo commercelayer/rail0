@@ -18,7 +18,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "1.2.0";
+    string public constant VERSION = "1.2.1";
 
     /// @dev Reason emitted on the `DisputeClosed` event when a dispute is closed
     ///      automatically by a full refund (one that brings `refundableAmount` to 0).
