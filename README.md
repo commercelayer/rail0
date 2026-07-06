@@ -40,10 +40,10 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Chain     | Network         | Stablecoin(s) | Status            | _rail0_ address |
 |-----------|-----------------|---------------|-------------------|-----------------|
 | Arbitrum  | Mainnet         | USDC          | Planned           | — |
-| Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x58E1…2De2`](https://testnet.arcscan.app/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
+| Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x8416…C16e`](https://testnet.arcscan.app/address/0x841608e9cB4D62607D3b1d2617aF67025C30C16e) |
 | Avalanche | Mainnet         | USDC, EURC    | Planned           | — |
 | Base      | Mainnet         | USDC, EURC    | Planned           | — |
-| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0xd9b5…6792`](https://celo-sepolia.blockscout.com/address/0xd9b5Be76F99EC8AE583dc1385832B2E54D406792) |
+| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0x58E1…2De2`](https://celo-sepolia.blockscout.com/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | — |
 | Optimism  | Mainnet         | USDC          | Planned           | — |
 | Plasma    | Testnet         | USDT0         | Planned           | — |
@@ -168,14 +168,14 @@ Per `paymentId`, the contract keeps two storage entries:
 
 Each deployment is constructed with a fixed list of accepted ERC-20 token addresses. `authorize`/`charge` revert with `TokenNotAccepted` if `p.token` is not in the allowlist. The allowlist is set in the constructor and **cannot be modified afterward** — adding a new stablecoin requires a new deployment.
 
-A `TokenAccepted(address indexed token)` event is emitted from the constructor for each entry, so an indexer can reconstruct the allowlist from the deployment transaction's logs. `isAcceptedToken(address)` is a public view for the same query.
+A `TokenAccepted(address indexed token)` event is emitted from the constructor for each entry, so an indexer can reconstruct the allowlist from the deployment transaction's logs. `isAcceptedToken(address)` is a public view for the single-token query, and `acceptedTokens()` returns the full allowlist in constructor order for enumeration (e.g. off-chain config sync).
 
 - One deployment per `(chain, set of accepted tokens)`. A single deployment can accept multiple stablecoins (e.g. USDC + EURC) if listed at construction.
 - The contract is versioned (`VERSION` constant, also in the EIP-712 domain); bumping it invalidates prior signatures, so version changes also require a new deployment.
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.1", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -403,6 +403,7 @@ cast call $RAIL0 "getConfigHash(bytes32)(bytes32)" $PAYMENT_ID --rpc-url $RPC
 # Domain separator and allowlist check
 cast call $RAIL0 "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC
 cast call $RAIL0 "isAcceptedToken(address)(bool)" $TOKEN --rpc-url $RPC
+cast call $RAIL0 "acceptedTokens()(address[])" --rpc-url $RPC
 ```
 
 ## Development
