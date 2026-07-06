@@ -1280,6 +1280,25 @@ contract RAIL0Test is Test {
         assertFalse(r.isAcceptedToken(address(0xdead)));
     }
 
+    function test_AcceptedTokens_ReturnsAllowlistInOrder() public {
+        MockERC20 t2 = new MockERC20();
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = address(t2);
+        RAIL0 r = new RAIL0(tokens);
+
+        address[] memory got = r.acceptedTokens();
+        assertEq(got.length, 2);
+        assertEq(got[0], address(token));
+        assertEq(got[1], address(t2));
+    }
+
+    function test_AcceptedTokens_EmptyWhenNoneAccepted() public {
+        address[] memory empty = new address[](0);
+        RAIL0 r = new RAIL0(empty);
+        assertEq(r.acceptedTokens().length, 0);
+    }
+
     function test_Constructor_EmitsTokenAccepted() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);

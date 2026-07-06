@@ -65,6 +65,12 @@ contract RAIL0 {
     /// @notice Tokens this deployment accepts. Set in constructor, never mutated.
     mapping(address => bool) private _accepted;
 
+    /// @notice The accepted tokens in constructor order, kept alongside `_accepted`
+    ///         so the full allowlist can be enumerated on-chain (see
+    ///         `acceptedTokens()`) — a mapping alone isn't enumerable. Fixed at
+    ///         construction, never mutated.
+    address[] private _acceptedList;
+
     // ================================================================
     //  Reentrancy lock
     // ================================================================
@@ -103,6 +109,7 @@ contract RAIL0 {
             if (t == address(0)) revert ZeroAddress();
             if (_accepted[t]) revert DuplicateToken();
             _accepted[t] = true;
+            _acceptedList.push(t);
             emit TokenAccepted(t);
         }
     }
@@ -430,6 +437,13 @@ contract RAIL0 {
     /// @notice Returns true if `token` is in this deployment's allowlist.
     function isAcceptedToken(address token) external view returns (bool) {
         return _accepted[token];
+    }
+
+    /// @notice Returns the full token allowlist set at deployment, in constructor
+    ///         order. Fixed for the deployment's lifetime. Complements
+    ///         `isAcceptedToken` with enumeration (e.g. for off-chain config sync).
+    function acceptedTokens() external view returns (address[] memory) {
+        return _acceptedList;
     }
 
     /// @notice Returns the on-chain state of a payment.
