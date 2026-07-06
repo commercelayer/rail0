@@ -394,8 +394,9 @@ thead th {
   padding: 14px 18px;
   background: var(--card);
   border-bottom: 1px solid var(--line);
+  white-space: nowrap;
 }
-tbody td { padding: 14px 18px; border-bottom: 1px solid var(--line-soft); color: var(--ink-soft); }
+tbody td { padding: 14px 18px; border-bottom: 1px solid var(--line-soft); color: var(--ink-soft); white-space: nowrap; }
 tbody tr:last-child td { border-bottom: none; }
 tbody td:first-child { color: var(--ink); font-weight: 550; }
 td code { font-size: 12.5px; }
