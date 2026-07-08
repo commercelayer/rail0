@@ -11,7 +11,7 @@
       try {
         var t = localStorage.getItem("rail0-theme");
         if (t !== "light" && t !== "dark") {
-          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          t = "dark"; // dark by default; OS preference no longer overrides
         }
         document.documentElement.dataset.theme = t;
       } catch (e) {}
@@ -422,13 +422,12 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
       var root = document.documentElement;
       var btn = document.querySelector(".theme-toggle");
       if (!btn) return;
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
       function stored() {
         try { return localStorage.getItem("rail0-theme"); } catch (e) { return null; }
       }
       function effective() {
         var s = stored();
-        return s === "light" || s === "dark" ? s : (mq.matches ? "dark" : "light");
+        return s === "light" || s === "dark" ? s : "dark";
       }
       function render() {
         var t = effective();
@@ -440,10 +439,6 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
         try { localStorage.setItem("rail0-theme", next); } catch (e) {}
         root.dataset.theme = next;
         render();
-      });
-      // Follow live OS changes for visitors who haven't chosen explicitly.
-      mq.addEventListener("change", function () {
-        if (!stored()) { root.dataset.theme = mq.matches ? "dark" : "light"; render(); }
       });
       render();
     })();
