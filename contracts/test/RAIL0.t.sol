@@ -147,6 +147,7 @@ contract MockTransferFromFails is MockERC20 {
 contract MockReentrant {
     bool public reenterAttempted;
     bool public reenterSucceeded;
+    bytes public reenterRevertData; // revert data of the inner call when it failed
     address public rail0;
     bytes public payload;
 
@@ -160,8 +161,9 @@ contract MockReentrant {
     {
         if (rail0 != address(0) && payload.length > 0) {
             reenterAttempted = true;
-            (bool ok,) = rail0.call(payload);
+            (bool ok, bytes memory ret) = rail0.call(payload);
             reenterSucceeded = ok;
+            if (!ok) reenterRevertData = ret;
         }
     }
 
@@ -334,7 +336,11 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory tampered = _payment();
         tampered.amount = 200e6;
 
-        vm.expectRevert();
+        // Pin the failure to the token's signature check: the tampered amount changes
+        // the derived nonce, so the recovered signer != payer and the token reverts
+        // "EIP3009: bad sig". A bare expectRevert() would also pass if a future RAIL0
+        // change reverted earlier — this asserts the tamper actually reaches the token.
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, tampered, v, r, s);
     }
@@ -1556,6 +1562,23 @@ contract RAIL0Test is Test {
         r.void(PAYMENT_ID, p);
     }
 
+    function test_SafeTransfer_AcceptsNonReturningToken() public {
+        // USDT-mainnet style: `transfer` returns NO data. _safeTransfer must accept it
+        // (the `data.length == 0` branch — success, no bool to decode), so an outbound
+        // transfer with empty return data must NOT revert. Mock the token's transfer to
+        // return empty bytes and confirm capture settles.
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.mockCall(address(token), abi.encodeWithSelector(IERC20.transfer.selector, payee, uint256(100e6)), hex"");
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 100e6);
+
+        assertEq(
+            rail0.getPaymentState(PAYMENT_ID).capturableAmount, 0, "capture didn't settle against a non-returning token"
+        );
+    }
+
     function test_Refund_RevertsWhenTransferToPayer_Fails() public {
         // receiveWithAuthorization succeeds (tokens move from payee to RAIL0) but
         // the subsequent _safeTransfer(payer) fails. Use vm.mockCall to make
@@ -1617,6 +1640,14 @@ contract RAIL0Test is Test {
 
         assertTrue(evil.reenterAttempted(), "reentrant token did not actually attempt reentry");
         assertFalse(evil.reenterSucceeded(), "reentrancy guard failed to block inner call");
+        // Not just "the inner call failed" — assert it failed for the RIGHT reason:
+        // the reentrancy guard, before the token's own payee check. Reentrancy() has
+        // no args, so its revert data is exactly the 4-byte selector.
+        assertEq(
+            evil.reenterRevertData(),
+            abi.encodeWithSelector(RAIL0.Reentrancy.selector),
+            "inner call did not revert with Reentrancy"
+        );
     }
 
     // ============================================================
