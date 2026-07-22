@@ -184,6 +184,7 @@ contract RAIL0 {
     error AuthorizationNotExpired();
     error RefundExpired();
     error ZeroAddress();
+    error SelfPayment();
     error InvalidCaptureAmount();
     error InvalidRefundAmount();
     error NothingToVoid();
@@ -521,6 +522,11 @@ contract RAIL0 {
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
         }
+        // A payment can't be from an address to itself: payer (funds' `from`) and
+        // payee (`to`) must differ. A self-payment is economically meaningless
+        // (funds loop back to the one address, losing only gas) — reject it here so
+        // it can never be authorized/charged on-chain.
+        if (p.payer == p.payee) revert SelfPayment();
         if (!_accepted[p.token]) revert TokenNotAccepted();
     }
 
