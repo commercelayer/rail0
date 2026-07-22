@@ -73,7 +73,7 @@ function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, by
 
 Buyer escrows `p.amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order and not in the past, addresses non-zero, token allowlisted), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce and pinned validity window. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` the hold — but only while nothing has been captured yet; otherwise `release` opens after `authorizationExpiry`.
+The buyer signs an **EIP-3009 `TransferWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order and not in the past, addresses non-zero, payer and payee distinct, token allowlisted), records the payment state, then calls `token.transferWithAuthorization(...)` with the deterministic nonce and pinned validity window. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` the hold — but only while nothing has been captured yet; otherwise `release` opens after `authorizationExpiry`.
 
 #### Charge
 
@@ -175,7 +175,7 @@ A `TokenAccepted(address indexed token)` event is emitted from the constructor f
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.1", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.2", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -237,6 +237,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
 | `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
 | `ZeroAddress`               | `payer`, `payee`, or `token` is the zero address.                  |
+| `SelfPayment`               | `payer == payee` — a payment can't be sent from an address to itself. |
 | `InvalidCaptureAmount`      | `amount == 0` or `amount > capturableAmount`.                      |
 | `InvalidRefundAmount`       | `amount == 0` or `amount > refundableAmount`.                      |
 | `NothingToVoid`             | `void` called with `capturableAmount == 0`.                        |

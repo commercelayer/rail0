@@ -352,6 +352,25 @@ contract RAIL0Test is Test {
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
+    function test_Authorize_RevertsIfPayerEqualsPayee() public {
+        // A self-payment (payer == payee) is rejected in _validatePayment, before
+        // any signature check, so a dummy signature is enough. msg.sender must be
+        // the payee (== payer here) to pass the NotPayee gate first.
+        RAIL0.Payment memory p = _payment();
+        p.payee = payer;
+        vm.expectRevert(RAIL0.SelfPayment.selector);
+        vm.prank(payer);
+        rail0.authorize(PAYMENT_ID, p, 0, bytes32(0), bytes32(0));
+    }
+
+    function test_Charge_RevertsIfPayerEqualsPayee() public {
+        RAIL0.Payment memory p = _payment();
+        p.payee = payer;
+        vm.expectRevert(RAIL0.SelfPayment.selector);
+        vm.prank(payer);
+        rail0.charge(PAYMENT_ID, p, 0, bytes32(0), bytes32(0));
+    }
+
     function test_Authorize_ChargeNonceDoesNotWorkForAuthorize() public {
         // Buyer signs with the CHARGE nonce — merchant tries to use it for authorize
         RAIL0.Payment memory p = _payment();
