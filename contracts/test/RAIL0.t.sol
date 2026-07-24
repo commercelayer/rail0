@@ -319,7 +319,7 @@ contract RAIL0Test is Test {
             _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         // Token reverts inside transferWithAuthorization on bad sig — bubbles through RAIL0.
-        vm.expectRevert();
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
@@ -366,7 +366,9 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, chargeNonce);
 
-        vm.expectRevert();
+        // RAIL0 derives the AUTHORIZE nonce, but the signature covers the CHARGE nonce,
+        // so the token recovers a different signer and rejects with "EIP3009: bad sig".
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
@@ -433,7 +435,9 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, authNonce);
 
-        vm.expectRevert();
+        // RAIL0 derives the CHARGE nonce, but the signature covers the AUTHORIZE nonce,
+        // so the token recovers a different signer and rejects with "EIP3009: bad sig".
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.charge(PAYMENT_ID, p, v, r, s);
     }
@@ -458,7 +462,8 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
-        vm.expectRevert();
+        // Token reverts inside transferWithAuthorization on bad sig — bubbles through RAIL0.
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.charge(PAYMENT_ID, p, v, r, s);
     }
@@ -473,7 +478,9 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory tampered = _payment();
         tampered.amount = 200e6;
 
-        vm.expectRevert();
+        // Same pinning rationale as test_Authorize_RevertsOnTamperedPayment: the tampered
+        // amount changes the derived nonce, so recovery fails inside the token.
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.charge(PAYMENT_ID, tampered, v, r, s);
     }
@@ -716,7 +723,8 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payerKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
-        vm.expectRevert();
+        // Token reverts inside receiveWithAuthorization on bad sig — bubbles through RAIL0.
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, s);
     }
@@ -735,8 +743,11 @@ contract RAIL0Test is Test {
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, s);
 
-        // Replay with same nonce reverts — token marks nonce as used.
-        vm.expectRevert();
+        // Replay with the same signature reverts. Note the defense that fires first:
+        // RAIL0 derives the refund nonce from the CURRENT refundableAmount (now 50e6,
+        // not the 100e6 the signature covered), so the token sees a fresh nonce but a
+        // digest the payee never signed → "EIP3009: bad sig" (not "EIP3009: nonce used").
+        vm.expectRevert(bytes("EIP3009: bad sig"));
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, s);
     }
