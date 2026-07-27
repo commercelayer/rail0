@@ -40,9 +40,10 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Chain     | Network         | Stablecoin(s) | Status            | _rail0_ address |
 |-----------|-----------------|---------------|-------------------|-----------------|
 | Arbitrum  | Mainnet         | USDC          | Planned           | — |
-| Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x8416…C16e`](https://testnet.arcscan.app/address/0x841608e9cB4D62607D3b1d2617aF67025C30C16e) |
+| Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Avalanche | Mainnet         | USDC, EURC    | Planned           | — |
 | Base      | Mainnet         | USDC, EURC    | Planned           | — |
+| Base      | Sepolia testnet | USDC          | **Live**          | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0x58E1…2De2`](https://celo-sepolia.blockscout.com/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | — |
 | Optimism  | Mainnet         | USDC          | Planned           | — |
@@ -51,6 +52,20 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Tempo     | —               | TIP-20        | Awaiting EIP-3009 | — |
 
 Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
+
+### v1.3.0 deployments
+
+Both live deployments share the address **`0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F`** — not by CREATE2, but because the
+deployer's nonce was 0 on both chains, so plain CREATE produced the same result. Do not rely on
+this holding for future chains.
+
+| Chain | Chain ID | Accepted tokens | Deploy block | Source verification |
+|---|---:|---|---:|---|
+| Arc Testnet | 5042002 | USDC, EURC | 53 947 993 | [Sourcify](https://repo.sourcify.dev/5042002/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) `exact_match` · [arcscan](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Base Sepolia | 84532 | USDC | 44 700 151 | [Sourcify](https://repo.sourcify.dev/84532/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) `exact_match` · [Blockscout](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+
+`exact_match` covers **both** creation and runtime bytecode — the constructor arguments are
+verified too, not just the deployed code.
 
 ## Protocol
 
@@ -175,7 +190,7 @@ A `TokenAccepted(address indexed token)` event is emitted from the constructor f
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.2.2", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.3.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -209,10 +224,16 @@ event TokenAccepted(address indexed token);
 
 event PaymentAuthorized(bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
 event PaymentCharged   (bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
-event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+// The four fund-moving events carry the delta (`amount`) AND the escrow balances
+// as they stand AFTER the operation, so each event is self-sufficient: an indexer
+// reads the balance instead of folding every prior event over its own database —
+// a fold that silently misreports a partial capture as full whenever the event
+// stream has a gap. Free to emit: the values are already in memory for the state
+// write, so only the log payload grows (~0.4% of a capture).
+event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
 
 // Dispute signal — no fund effect. `reason` is a caller-supplied bytes32 code (meaning off-chain).
 event PaymentDisputed  (bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
