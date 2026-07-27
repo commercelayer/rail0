@@ -44,7 +44,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Avalanche | Mainnet         | USDC, EURC    | Planned           | —       | — |
 | Base      | Mainnet         | USDC, EURC    | Planned           | —       | — |
 | Base      | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | 1.2.1   | [`0x58E1…2De2`](https://celo-sepolia.blockscout.com/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
+| Celo      | Sepolia testnet | USDC, USD₮    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | —       | — |
 | Optimism  | Mainnet         | USDC          | Planned           | —       | — |
 | Plasma    | Testnet         | USDT0         | Planned           | —       | — |
@@ -53,22 +53,14 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 
 Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
 Note the **version column**: the EIP-712 domain binds it, so a payment signed against one version
-does not verify against another. Celo Sepolia still runs 1.2.1 and is not served by the reference
-gateway, whose active chains must all share one version.
+does not verify against another, and a gateway that builds the domain from one global version can
+only serve chains that agree on it.
 
-### v1.3.0 deployments
-
-Both live deployments share the address **`0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F`** — not by CREATE2, but because the
-deployer's nonce was 0 on both chains, so plain CREATE produced the same result. Do not rely on
-this holding for future chains.
-
-| Chain | Chain ID | Accepted tokens | Deploy block | Source verification |
-|---|---:|---|---:|---|
-| Arc Testnet | 5042002 | USDC, EURC | 53 947 993 | [Sourcify](https://repo.sourcify.dev/5042002/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) `exact_match` · [arcscan](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Base Sepolia | 84532 | USDC | 44 700 151 | [Sourcify](https://repo.sourcify.dev/84532/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) `exact_match` · [Blockscout](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-
-`exact_match` covers **both** creation and runtime bytecode — the constructor arguments are
-verified too, not just the deployed code.
+Celo Sepolia carries the contract but is **not served by the reference gateway**, for a reason worth
+recording because it is not the obvious one: its tokens *do* implement EIP-3009 (verified on-chain
+against the deployment's own allowlist). The blocker is indexing — the reference indexer reads
+exclusively through HyperSync, which does not cover that chain. A limitation of the surrounding
+tooling, liftable without touching the contract.
 
 ## Protocol
 
