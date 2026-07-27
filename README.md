@@ -37,21 +37,24 @@ _rail0_ has two hard requirements — any chain and token that meet them can run
 
 Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second finality** — there the merchant pays gas in the asset being settled and checkout confirms instantly — but neither is required; on any other EVM chain gas is simply paid in that chain's native token.
 
-| Chain     | Network         | Stablecoin(s) | Status            | _rail0_ address |
-|-----------|-----------------|---------------|-------------------|-----------------|
-| Arbitrum  | Mainnet         | USDC          | Planned           | — |
-| Arc       | Testnet         | USDC, EURC    | **Live**          | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Avalanche | Mainnet         | USDC, EURC    | Planned           | — |
-| Base      | Mainnet         | USDC, EURC    | Planned           | — |
-| Base      | Sepolia testnet | USDC          | **Live**          | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | [`0x58E1…2De2`](https://celo-sepolia.blockscout.com/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
-| Ethereum  | Mainnet         | USDC, EURC    | Planned           | — |
-| Optimism  | Mainnet         | USDC          | Planned           | — |
-| Plasma    | Testnet         | USDT0         | Planned           | — |
-| Polygon   | Mainnet         | USDC          | Planned           | — |
-| Tempo     | —               | TIP-20        | Awaiting EIP-3009 | — |
+| Chain     | Network         | Stablecoin(s) | Status            | Version | _rail0_ address |
+|-----------|-----------------|---------------|-------------------|---------|-----------------|
+| Arbitrum  | Mainnet         | USDC          | Planned           | —       | — |
+| Arc       | Testnet         | USDC, EURC    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Avalanche | Mainnet         | USDC, EURC    | Planned           | —       | — |
+| Base      | Mainnet         | USDC, EURC    | Planned           | —       | — |
+| Base      | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Celo      | Sepolia testnet | USDC, USDT    | **Live**          | 1.2.1   | [`0x58E1…2De2`](https://celo-sepolia.blockscout.com/address/0x58E1A21F6d34e9F9Ecc441B8079befd0ff892De2) |
+| Ethereum  | Mainnet         | USDC, EURC    | Planned           | —       | — |
+| Optimism  | Mainnet         | USDC          | Planned           | —       | — |
+| Plasma    | Testnet         | USDT0         | Planned           | —       | — |
+| Polygon   | Mainnet         | USDC          | Planned           | —       | — |
+| Tempo     | —               | TIP-20        | Awaiting EIP-3009 | —       | — |
 
 Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
+Note the **version column**: the EIP-712 domain binds it, so a payment signed against one version
+does not verify against another. Celo Sepolia still runs 1.2.1 and is not served by the reference
+gateway, whose active chains must all share one version.
 
 ### v1.3.0 deployments
 
