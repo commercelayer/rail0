@@ -1691,4 +1691,154 @@ contract RAIL0Test is Test {
         assertEq(token.balanceOf(payee), 100e6);
         assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 100e6);
     }
+
+    // ================================================================
+    //  Post-event balances carried by the four fund-moving events
+    // ================================================================
+    //
+    // These events carry the escrow balances AS THEY STAND AFTER the operation,
+    // so an indexer can read the balance instead of reconstructing it by folding
+    // every prior event over its own database — a fold that silently misreports a
+    // PARTIAL capture as a FULL one whenever the event stream has a gap.
+    //
+    // That makes the emitted balances load-bearing for everything downstream, so
+    // each one is asserted here against getPaymentState (the on-chain truth they
+    // must mirror) rather than against a hand-written literal.
+
+    /// Re-declared locally: vm.expectEmit needs the event in the test's scope.
+    event PaymentCaptured(
+        bytes32 indexed paymentId, address indexed payer, address indexed payee,
+        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+    );
+    event PaymentVoided(
+        bytes32 indexed paymentId, address indexed payer, address indexed payee,
+        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+    );
+    event PaymentReleased(
+        bytes32 indexed paymentId, address indexed payer, address indexed payee,
+        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+    );
+    event PaymentRefunded(
+        bytes32 indexed paymentId, address indexed payer, address indexed payee,
+        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+    );
+
+    function test_Event_Capture_Partial_CarriesPostBalances() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // A partial capture moves 30 out of escrow and into the refundable bucket.
+        vm.expectEmit(true, true, true, true);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, 30e6, 70e6, 30e6);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 30e6);
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(s.capturableAmount, 70e6, "event must mirror stored capturable");
+        assertEq(s.refundableAmount, 30e6, "event must mirror stored refundable");
+    }
+
+    function test_Event_Capture_SecondPartial_CarriesRunningBalances() public {
+        // The regression this whole change exists for: after a FIRST capture the
+        // second event must still state the true remainder, so an indexer that
+        // never saw the first one cannot conclude "capturable 0 => fully captured".
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 30e6);
+
+        vm.expectEmit(true, true, true, true);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, 20e6, 50e6, 50e6);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 20e6);
+
+        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 50e6);
+    }
+
+    function test_Event_Capture_Full_CarriesZeroCapturable() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.expectEmit(true, true, true, true);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, 100e6, 0, 100e6);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 100e6);
+    }
+
+    function test_Event_Void_CarriesZeroCapturable() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // Void drains escrow; nothing was captured, so refundable stays 0.
+        vm.expectEmit(true, true, true, true);
+        emit PaymentVoided(PAYMENT_ID, payer, payee, 100e6, 0, 0);
+        vm.prank(payee);
+        rail0.void(PAYMENT_ID, p);
+    }
+
+    function test_Event_Release_KeepsRefundableFromEarlierCapture() public {
+        // Release after a partial capture: escrow goes to 0, but the already
+        // captured amount is still refundable and must be reported as such.
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 40e6);
+
+        vm.warp(uint256(p.authorizationExpiry));
+
+        vm.expectEmit(true, true, true, true);
+        emit PaymentReleased(PAYMENT_ID, payer, payee, 60e6, 0, 40e6);
+        vm.prank(payer);
+        rail0.release(PAYMENT_ID, p);
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(s.capturableAmount, 0);
+        assertEq(s.refundableAmount, 40e6);
+    }
+
+    function test_Event_Refund_Partial_CarriesPostBalances() public {
+        // Charge puts the full amount straight into the refundable bucket and
+        // leaves escrow empty, so capturable must be reported as 0 throughout.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        (uint8 v, bytes32 r, bytes32 sig) =
+            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+
+        vm.expectEmit(true, true, true, true);
+        emit PaymentRefunded(PAYMENT_ID, payer, payee, 50e6, 0, 50e6);
+        vm.prank(payee);
+        rail0.refund(PAYMENT_ID, p, 50e6, v, r, sig);
+
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 50e6);
+    }
+
+    function test_Event_Refund_Full_CarriesZeroRefundable() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+
+        bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        (uint8 v, bytes32 r, bytes32 sig) =
+            _sign3009(payeeKey, token, payee, address(rail0), 100e6, 0, p.refundExpiry, nonce);
+
+        vm.expectEmit(true, true, true, true);
+        emit PaymentRefunded(PAYMENT_ID, payer, payee, 100e6, 0, 0);
+        vm.prank(payee);
+        rail0.refund(PAYMENT_ID, p, 100e6, v, r, sig);
+
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 0);
+    }
+
+    function test_Event_Capture_AfterCharge_IsNotPossible_SoRefundIsTheOnlyPath() public {
+        // Guards the assumption behind the refund assertions above: a charged
+        // payment holds nothing in escrow, so its events always report capturable 0.
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 0);
+    }
 }

@@ -18,7 +18,7 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "1.2.2";
+    string public constant VERSION = "1.3.0";
 
     /// @dev Reason emitted on the `DisputeClosed` event when a dispute is closed
     ///      automatically by a full refund (one that brings `refundableAmount` to 0).
@@ -147,10 +147,55 @@ contract RAIL0 {
 
     event PaymentAuthorized(bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
     event PaymentCharged(bytes32 indexed paymentId, address indexed payer, address indexed payee, Payment payment);
-    event PaymentCaptured(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-    event PaymentVoided(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-    event PaymentReleased(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
-    event PaymentRefunded(bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount);
+    // The four fund-moving events carry BOTH the delta (`amount`) and the escrow
+    // balances as they stand after the operation. Emitting the resulting balances
+    // is what makes each event self-sufficient: an indexer can read the balance
+    // instead of reconstructing it by folding every prior event over its own
+    // database. That reconstruction is correct only while the event stream is
+    // complete, so a single missed event (a late start_block, a reindex from a
+    // later block, a reorg past the indexer's rollback depth) would otherwise
+    // silently misreport a PARTIAL capture as a FULL one — the events are each
+    // authentic, but the running total derived from them is not.
+    //
+    // The balances are free to emit here: every call site has already computed
+    // them in memory to write to `_state`, so there is no extra SLOAD and no extra
+    // arithmetic — only the log payload grows (2 x 32 bytes ABI-encoded, ~512 gas,
+    // about 0.3% of a capture).
+    //
+    // `PaymentAuthorized` / `PaymentCharged` need no such fields: they carry the
+    // whole `Payment` struct, and both entry points initialize the state from it.
+    event PaymentCaptured(
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
+    );
+    event PaymentVoided(
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
+    );
+    event PaymentReleased(
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
+    );
+    event PaymentRefunded(
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
+    );
 
     /// @notice Buyer opened a dispute against a payment. Signal only — no funds move.
     /// @param reason Caller-supplied code (e.g. `keccak256(text)`); meaning lives off-chain.
@@ -282,7 +327,8 @@ contract RAIL0 {
 
         _safeTransfer(p.token, p.payer, amount);
 
-        emit PaymentReleased(paymentId, p.payer, p.payee, amount);
+        // Like void: escrow is drained, the refundable bucket is untouched.
+        emit PaymentReleased(paymentId, p.payer, p.payee, amount, 0, s.refundableAmount);
     }
 
     // ================================================================
@@ -339,12 +385,16 @@ contract RAIL0 {
 
         // Safe cast: amount <= capturableAmount (uint120) checked above.
         uint120 captureAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId].capturableAmount = s.capturableAmount - captureAmount120;
-        _state[paymentId].refundableAmount = s.refundableAmount + captureAmount120;
+        // Held in locals so the same values serve the storage write and the event —
+        // the post-event balances cost nothing extra to emit (see the event decls).
+        uint120 newCapturable = s.capturableAmount - captureAmount120;
+        uint120 newRefundable = s.refundableAmount + captureAmount120;
+        _state[paymentId].capturableAmount = newCapturable;
+        _state[paymentId].refundableAmount = newRefundable;
 
         _safeTransfer(p.token, p.payee, amount);
 
-        emit PaymentCaptured(paymentId, p.payer, p.payee, amount);
+        emit PaymentCaptured(paymentId, p.payer, p.payee, amount, newCapturable, newRefundable);
     }
 
     /// @notice Cancel an authorization, returning held funds to the buyer.
@@ -367,7 +417,9 @@ contract RAIL0 {
 
         _safeTransfer(p.token, p.payer, amount);
 
-        emit PaymentVoided(paymentId, p.payer, p.payee, amount);
+        // Void drains escrow and never touches the refundable bucket, so the
+        // post-event balances are 0 and the unchanged s.refundableAmount.
+        emit PaymentVoided(paymentId, p.payer, p.payee, amount, 0, s.refundableAmount);
     }
 
     /// @notice Refund a previously captured amount from the merchant's wallet.
@@ -404,12 +456,15 @@ contract RAIL0 {
 
         // Safe cast: amount <= refundableAmount (uint120) checked above.
         uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
-        _state[paymentId].refundableAmount = st.refundableAmount - refundAmount120;
+        // Local reused by the storage write, the dispute-close test below and the
+        // event, so the post-refund balance is read once rather than re-loaded.
+        uint120 newRefundable = st.refundableAmount - refundAmount120;
+        _state[paymentId].refundableAmount = newRefundable;
 
         // A full refund (one that zeroes refundableAmount) resolves any open dispute:
         // clear the flag and emit the close event with the reserved reason. Effects only —
         // this sits before the external calls, preserving checks-effects-interactions.
-        if (st.disputed && _state[paymentId].refundableAmount == 0) {
+        if (st.disputed && newRefundable == 0) {
             _state[paymentId].disputed = false;
             emit DisputeClosed(paymentId, p.payer, p.payee, msg.sender, REASON_FULL_REFUND);
         }
@@ -428,7 +483,9 @@ contract RAIL0 {
 
         _safeTransfer(p.token, p.payer, amount);
 
-        emit PaymentRefunded(paymentId, p.payer, p.payee, amount);
+        // Refund draws down the refundable bucket only; escrow is untouched, so
+        // capturable is st.capturableAmount as loaded.
+        emit PaymentRefunded(paymentId, p.payer, p.payee, amount, st.capturableAmount, newRefundable);
     }
 
     // ================================================================
