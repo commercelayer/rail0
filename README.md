@@ -48,25 +48,17 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Optimism  | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet  | USDT0         | Planned  | —       | — |
 
-Every live deployment shares one address. That is a property of how it was deployed
-— the deployer's nonce was 0 on each chain, and a CREATE address derives only from
-`(sender, nonce)` — not a guarantee: the allowlists differ, and nothing reserves that
-address on a chain not listed here.
-
 ### Mainnets
 
-No mainnet deployment yet, so version and address are omitted rather than shown as
-a column of dashes.
-
-| Chain     | Stablecoin(s) | Status            |
-|-----------|---------------|-------------------|
-| Arbitrum  | USDC          | Planned           |
-| Avalanche | USDC, EURC    | Planned           |
-| Base      | USDC, EURC    | Planned           |
-| Ethereum  | USDC, EURC    | Planned           |
-| Optimism  | USDC          | Planned           |
-| Polygon   | USDC          | Planned           |
-| Tempo     | TIP-20        | Awaiting EIP-3009 |
+| Chain     | Network  | Stablecoin(s) | Status            | Version | _rail0_ address |
+|-----------|----------|---------------|-------------------|---------|-----------------|
+| Arbitrum  | Mainnet  | USDC          | Planned           | —       | — |
+| Avalanche | Mainnet  | USDC, EURC    | Planned           | —       | — |
+| Base      | Mainnet  | USDC, EURC    | Planned           | —       | — |
+| Ethereum  | Mainnet  | USDC, EURC    | Planned           | —       | — |
+| Optimism  | Mainnet  | USDC          | Planned           | —       | — |
+| Polygon   | Mainnet  | USDC          | Planned           | —       | — |
+| Tempo     | —        | TIP-20        | Awaiting EIP-3009 | —       | — |
 
 Tempo is the one entry whose status is not about scheduling: TIP-20 does not
 implement EIP-3009, so _rail0_ cannot run there at all until that changes.
