@@ -37,21 +37,39 @@ _rail0_ has two hard requirements — any chain and token that meet them can run
 
 Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second finality** — there the merchant pays gas in the asset being settled and checkout confirms instantly — but neither is required; on any other EVM chain gas is simply paid in that chain's native token.
 
-| Chain     | Network         | Stablecoin(s) | Status            | Version | _rail0_ address |
-|-----------|-----------------|---------------|-------------------|---------|-----------------|
-| Arbitrum  | Mainnet         | USDC          | Planned           | —       | — |
-| Arbitrum  | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Arc       | Testnet         | USDC, EURC    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Avalanche | Mainnet         | USDC, EURC    | Planned           | —       | — |
-| Base      | Mainnet         | USDC, EURC    | Planned           | —       | — |
-| Base      | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Celo      | Sepolia testnet | USDC, USD₮    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Ethereum  | Mainnet         | USDC, EURC    | Planned           | —       | — |
-| Optimism  | Mainnet         | USDC          | Planned           | —       | — |
-| Optimism  | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Plasma    | Testnet         | USDT0         | Planned           | —       | — |
-| Polygon   | Mainnet         | USDC          | Planned           | —       | — |
-| Tempo     | —               | TIP-20        | Awaiting EIP-3009 | —       | — |
+### Testnets
+
+| Chain     | Network  | Stablecoin(s) | Status   | Version | _rail0_ address |
+|-----------|----------|---------------|----------|---------|-----------------|
+| Arbitrum  | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Arc       | Testnet  | USDC, EURC    | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Base      | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Celo      | Sepolia  | USDC, USD₮    | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Optimism  | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Plasma    | Testnet  | USDT0         | Planned  | —       | — |
+
+Every live deployment shares one address. That is a property of how it was deployed
+— the deployer's nonce was 0 on each chain, and a CREATE address derives only from
+`(sender, nonce)` — not a guarantee: the allowlists differ, and nothing reserves that
+address on a chain not listed here.
+
+### Mainnets
+
+No mainnet deployment yet, so version and address are omitted rather than shown as
+a column of dashes.
+
+| Chain     | Stablecoin(s) | Status            |
+|-----------|---------------|-------------------|
+| Arbitrum  | USDC          | Planned           |
+| Avalanche | USDC, EURC    | Planned           |
+| Base      | USDC, EURC    | Planned           |
+| Ethereum  | USDC, EURC    | Planned           |
+| Optimism  | USDC          | Planned           |
+| Polygon   | USDC          | Planned           |
+| Tempo     | TIP-20        | Awaiting EIP-3009 |
+
+Tempo is the one entry whose status is not about scheduling: TIP-20 does not
+implement EIP-3009, so _rail0_ cannot run there at all until that changes.
 
 Integrators should pin the _rail0_ address per chain and not assume cross-deployment compatibility.
 Note the **version column**: the EIP-712 domain binds it, so a payment signed against one version
