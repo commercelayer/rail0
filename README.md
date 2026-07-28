@@ -40,6 +40,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Chain     | Network         | Stablecoin(s) | Status            | Version | _rail0_ address |
 |-----------|-----------------|---------------|-------------------|---------|-----------------|
 | Arbitrum  | Mainnet         | USDC          | Planned           | —       | — |
+| Arbitrum  | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Arc       | Testnet         | USDC, EURC    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Avalanche | Mainnet         | USDC, EURC    | Planned           | —       | — |
 | Base      | Mainnet         | USDC, EURC    | Planned           | —       | — |
@@ -47,6 +48,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Celo      | Sepolia testnet | USDC, USD₮    | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Ethereum  | Mainnet         | USDC, EURC    | Planned           | —       | — |
 | Optimism  | Mainnet         | USDC          | Planned           | —       | — |
+| Optimism  | Sepolia testnet | USDC          | **Live**          | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet         | USDT0         | Planned           | —       | — |
 | Polygon   | Mainnet         | USDC          | Planned           | —       | — |
 | Tempo     | —               | TIP-20        | Awaiting EIP-3009 | —       | — |
