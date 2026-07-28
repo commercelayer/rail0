@@ -39,26 +39,26 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 
 ### Testnets
 
-| Chain     | Network  | Stablecoin(s) | Status   | Version | _rail0_ address |
-|-----------|----------|---------------|----------|---------|-----------------|
-| Arbitrum  | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Arc       | Testnet  | USDC, EURC    | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Base      | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Celo      | Sepolia  | USDC, USD₮    | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Optimism  | Sepolia  | USDC          | **Live** | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Plasma    | Testnet  | USDT0         | Planned  | —       | — |
+| Chain     | Network  | Stablecoin(s) | Status   | HyperSync | Version | _rail0_ address |
+|-----------|----------|---------------|----------|-----------|---------|-----------------|
+| Arbitrum  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Arc       | Testnet  | USDC, EURC    | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Base      | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Celo      | Sepolia  | USDC, USD₮    | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Plasma    | Testnet  | USDT0         | Planned  | **no**    | —       | — |
 
 ### Mainnets
 
-| Chain     | Network  | Stablecoin(s) | Status            | Version | _rail0_ address |
-|-----------|----------|---------------|-------------------|---------|-----------------|
-| Arbitrum  | Mainnet  | USDC          | Planned           | —       | — |
-| Avalanche | Mainnet  | USDC, EURC    | Planned           | —       | — |
-| Base      | Mainnet  | USDC, EURC    | Planned           | —       | — |
-| Ethereum  | Mainnet  | USDC, EURC    | Planned           | —       | — |
-| Optimism  | Mainnet  | USDC          | Planned           | —       | — |
-| Polygon   | Mainnet  | USDC          | Planned           | —       | — |
-| Tempo     | —        | TIP-20        | Awaiting EIP-3009 | —       | — |
+| Chain     | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
+|-----------|----------|---------------|-------------------|-----------|---------|-----------------|
+| Arbitrum  | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Avalanche | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Base      | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Ethereum  | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Optimism  | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Polygon   | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Tempo     | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
 
 Tempo is the one entry whose status is not about scheduling: TIP-20 does not
 implement EIP-3009, so _rail0_ cannot run there at all until that changes.
@@ -68,11 +68,17 @@ Note the **version column**: the EIP-712 domain binds it, so a payment signed ag
 does not verify against another, and a gateway that builds the domain from one global version can
 only serve chains that agree on it.
 
-Celo Sepolia carries the contract but is **not served by the reference gateway**, for a reason worth
-recording because it is not the obvious one: its tokens *do* implement EIP-3009 (verified on-chain
-against the deployment's own allowlist). The blocker is indexing — the reference indexer reads
-exclusively through HyperSync, which does not cover that chain. A limitation of the surrounding
-tooling, liftable without touching the contract.
+**The HyperSync column is about tooling, not about _rail0_.** The contract is indifferent to how it
+is indexed; the *reference* indexer reads exclusively through
+[HyperSync](https://docs.envio.dev/docs/HyperSync/hypersync-supported-networks), so a chain without
+it can carry the contract and still not be served by the reference gateway. Every value above was
+checked by querying that chain's own HyperSync endpoint, not read off a list.
+
+That is exactly the case of **Celo Sepolia**, and the reason is worth recording because it is not the
+obvious one: its tokens *do* implement EIP-3009 (verified on-chain against the deployment's own
+allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap. Both chains'
+*mainnets* are covered, so the gap is testnet-only: easy to assume away in either direction. Either
+is liftable without touching the contract, by indexing that chain another way.
 
 ## Protocol
 
