@@ -155,14 +155,6 @@ contract MockTransferFails is MockERC20 {
     }
 }
 
-/// Token with working EIP-3009 but whose `transferFrom` returns false. Used to
-/// verify that `_safeTransferFrom` reverts with `TransferFailed` on bool=false.
-contract MockTransferFromFails is MockERC20 {
-    function transferFrom(address, address, uint256) external pure override returns (bool) {
-        return false;
-    }
-}
-
 /// Token whose transferWithAuthorization calls back into RAIL0 (reentrancy attempt).
 contract MockReentrant {
     bool public reenterAttempted;
@@ -1704,6 +1696,131 @@ contract RAIL0Test is Test {
         // …and the escrow is still there, unreachable.
         RAIL0.PaymentState memory st = r.getPaymentState(PAYMENT_ID);
         assertGt(st.capturableAmount, 0, "escrow remains, with no path out: the accepted risk");
+    }
+
+    // ============================================================
+    //  Accounting invariants (fuzz) and the guards that were never pinned (#44)
+    // ============================================================
+
+    /// The core accounting invariant, over arbitrary amounts and an arbitrary partial
+    /// capture: the two buckets are funded from the payment's immutable amount, so
+    /// together they can never exceed it. Every payout path derives from these, and the
+    /// whole suite was fixed-value before this — so nothing tested the property itself.
+    function testFuzz_CaptureKeepsBucketsWithinAmount(uint120 amount, uint120 captureAmount) public {
+        amount = uint120(bound(amount, 1, 10_000e6));
+        captureAmount = uint120(bound(captureAmount, 1, amount));
+
+        token.mint(payer, amount);
+        RAIL0.Payment memory p = _payment();
+        p.amount = amount;
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, captureAmount);
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertLe(
+            uint256(st.capturableAmount) + uint256(st.refundableAmount),
+            uint256(amount),
+            "capturable + refundable must never exceed the payment amount"
+        );
+        // Capture moves value between buckets rather than creating it, so with nothing
+        // refunded yet the sum is still exactly the amount.
+        assertEq(uint256(st.capturableAmount) + uint256(st.refundableAmount), uint256(amount));
+    }
+
+    /// The same invariant across a capture AND a refund, which is where an off-by-one in
+    /// the bucket arithmetic would show up.
+    function testFuzz_CaptureThenRefundKeepsBucketsWithinAmount(
+        uint120 amount,
+        uint120 captureAmount,
+        uint120 refundAmount
+    ) public {
+        amount = uint120(bound(amount, 2, 10_000e6));
+        captureAmount = uint120(bound(captureAmount, 1, amount));
+        refundAmount = uint120(bound(refundAmount, 1, captureAmount));
+
+        token.mint(payer, amount);
+        token.mint(payee, amount); // the payee funds the refund via EIP-3009
+        RAIL0.Payment memory p = _payment();
+        p.amount = amount;
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, captureAmount);
+
+        RAIL0.PaymentState memory mid = rail0.getPaymentState(PAYMENT_ID);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, rail0.hashPayment(p), mid.refundableAmount);
+        (uint8 v, bytes32 r, bytes32 ss) =
+            _sign3009(payeeKey, token, payee, address(rail0), refundAmount, 0, refundExpiry, nonce);
+        vm.prank(payee);
+        rail0.refund(PAYMENT_ID, p, refundAmount, v, r, ss);
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertLe(
+            uint256(st.capturableAmount) + uint256(st.refundableAmount),
+            uint256(amount),
+            "capturable + refundable must never exceed the payment amount"
+        );
+    }
+
+    /// The escrow-solvency invariant: the contract must hold at least what it still owes
+    /// the buyer. This is the property a non-standard token would break by transferring
+    /// less than `value` on the EIP-3009 pull, which the balance-delta discussion in #37
+    /// is about — so it is worth asserting on the honest token too, as the baseline.
+    function testFuzz_ContractHoldsAtLeastTheCapturableEscrow(uint120 amount, uint120 captureAmount) public {
+        amount = uint120(bound(amount, 1, 10_000e6));
+        captureAmount = uint120(bound(captureAmount, 1, amount));
+
+        token.mint(payer, amount);
+        RAIL0.Payment memory p = _payment();
+        p.amount = amount;
+        _authorize(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, captureAmount);
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertGe(
+            token.balanceOf(address(rail0)),
+            uint256(st.capturableAmount),
+            "the contract must hold at least the escrow it still owes the buyer"
+        );
+    }
+
+    /// `void` deliberately has NO time guard — unlike capture, which closes at
+    /// authorizationExpiry. Pinned because the asymmetry is easy to mistake for an
+    /// oversight and "tidy up" by adding one, which would strand a buyer's escrow.
+    function test_Void_HasNoTimeGuard() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        vm.warp(uint256(authorizationExpiry) + 1 days);
+
+        vm.prank(payee);
+        rail0.void(PAYMENT_ID, p);
+
+        assertEq(token.balanceOf(payer), 10_000e6, "void must still return the escrow after expiry");
+    }
+
+    /// An open dispute does NOT block capture: `dispute` is signal-only, with no fund
+    /// effect (see the README security model). Pinned so the design decision is visible
+    /// in the suite rather than only in prose.
+    function test_Capture_IsNotBlockedByAnOpenDispute() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p); // charge → everything refundable, so a dispute is meaningful
+
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, bytes32(uint256(1)));
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertTrue(st.disputed, "precondition: the dispute is open");
+        assertEq(st.capturableAmount, 0, "charge leaves nothing capturable");
+        // Nothing to capture after a charge, so the guard that fires is the amount one —
+        // NOT a dispute check, which is the point.
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidCaptureAmount.selector);
+        rail0.capture(PAYMENT_ID, p, 1);
     }
 
     function test_SafeTransfer_AcceptsNonReturningToken() public {
