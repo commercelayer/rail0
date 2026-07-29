@@ -678,6 +678,59 @@ contract RAIL0Test is Test {
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 0);
     }
 
+    /// Pins the partial-capture freeze as it stands, so the accepted trade-off recorded
+    /// in the README's security model cannot change silently.
+    ///
+    /// The two guards are each covered on their own elsewhere. What this pins is their
+    /// CONJUNCTION, which is the actual trade-off: after any partial capture there is
+    /// no on-chain path to return the remainder before authorizationExpiry, even when
+    /// both parties want it returned. void needs the escrow fully intact, release needs
+    /// expiry, and refund can only draw on the refundable bucket the capture created —
+    /// never on the escrow.
+    ///
+    /// Capturing 1 unit is enough, which is what makes it a cheap griefing lever: a
+    /// merchant can pin the buyer's escrow for the whole window at the cost of settling
+    /// one base unit. Deliberately a 1-unit capture here, not a plausible one.
+    function test_PartialCapture_FreezesTheRemainderUntilExpiry() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // The minimum that disables void.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 1);
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(s.capturableAmount, 100e6 - 1, "escrow should hold the uncaptured remainder");
+
+        // Neither party can return it. Both legs asserted together: either one opening
+        // would end the freeze, so a change to either must fail this test.
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.AlreadyCaptured.selector);
+        rail0.void(PAYMENT_ID, p);
+
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.AuthorizationNotExpired.selector);
+        rail0.release(PAYMENT_ID, p);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.AuthorizationNotExpired.selector);
+        rail0.release(PAYMENT_ID, p);
+
+        // And the escrow is untouched by the failed attempts.
+        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6 - 1);
+
+        // The freeze is time-bound, not permanent: release opens at expiry and returns
+        // the remainder to the buyer. That exit is the whole reason this is an accepted
+        // trade-off rather than a lost-funds bug.
+        vm.warp(authorizationExpiry);
+        uint256 balBefore = token.balanceOf(payer);
+        vm.prank(payer);
+        rail0.release(PAYMENT_ID, p);
+
+        assertEq(token.balanceOf(payer), balBefore + (100e6 - 1), "buyer recovers the remainder");
+        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 0);
+    }
+
     function test_Release_RevertsBeforeAuthExpiry() public {
         RAIL0.Payment memory p = _payment();
         _authorize(PAYMENT_ID, p);
