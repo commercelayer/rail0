@@ -168,7 +168,7 @@ contract RAIL0 {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -176,7 +176,7 @@ contract RAIL0 {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -184,7 +184,7 @@ contract RAIL0 {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -192,7 +192,7 @@ contract RAIL0 {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -396,7 +396,7 @@ contract RAIL0 {
 
         _safeTransfer(p.token, p.payee, amount);
 
-        emit PaymentCaptured(paymentId, p.payer, p.payee, amount, newCapturable, newRefundable);
+        emit PaymentCaptured(paymentId, p.payer, p.payee, captureAmount120, newCapturable, newRefundable);
     }
 
     /// @notice Cancel an authorization, returning held funds to the buyer.
@@ -486,7 +486,7 @@ contract RAIL0 {
 
         // Refund draws down the refundable bucket only; escrow is untouched, so
         // capturable is st.capturableAmount as loaded.
-        emit PaymentRefunded(paymentId, p.payer, p.payee, amount, st.capturableAmount, newRefundable);
+        emit PaymentRefunded(paymentId, p.payer, p.payee, refundAmount120, st.capturableAmount, newRefundable);
     }
 
     // ================================================================
