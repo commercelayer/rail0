@@ -40,8 +40,8 @@ contract RAIL0 {
     ///      refund has a unique, deterministic nonce tied to the payment's state at
     ///      signing time — preventing replays and double-spending of the same position.
     bytes32 internal constant _AUTHORIZE_NONCE_PREFIX = keccak256("RAIL0.AUTHORIZE");
-    bytes32 internal constant _CHARGE_NONCE_PREFIX    = keccak256("RAIL0.CHARGE");
-    bytes32 internal constant _REFUND_NONCE_PREFIX    = keccak256("RAIL0.REFUND");
+    bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
+    bytes32 internal constant _REFUND_NONCE_PREFIX = keccak256("RAIL0.REFUND");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
     bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
@@ -256,10 +256,7 @@ contract RAIL0 {
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Only `p.payee` (the merchant) may submit; the submitter pays gas.
-    function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
-        external
-        nonReentrant
-    {
+    function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -272,10 +269,18 @@ contract RAIL0 {
         // EIP-3009 pulls funds — token verifies the buyer's signature. Tampering with
         // any Payment field changes the configHash, which changes the nonce, which
         // makes the recovered signer differ from `p.payer`, causing the token to revert.
-        IEIP3009(p.token).transferWithAuthorization(
-            p.payer, address(this), p.amount, 0, p.authorizationExpiry,
-            _authorizeNonce(paymentId, configHash), v, r, s
-        );
+        IEIP3009(p.token)
+            .transferWithAuthorization(
+                p.payer,
+                address(this),
+                p.amount,
+                0,
+                p.authorizationExpiry,
+                _authorizeNonce(paymentId, configHash),
+                v,
+                r,
+                s
+            );
 
         emit PaymentAuthorized(paymentId, p.payer, p.payee, p);
     }
@@ -288,10 +293,7 @@ contract RAIL0 {
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
     ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
-    function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s)
-        external
-        nonReentrant
-    {
+    function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -301,10 +303,10 @@ contract RAIL0 {
         _state[paymentId] =
             PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount, disputed: false });
 
-        IEIP3009(p.token).transferWithAuthorization(
-            p.payer, address(this), p.amount, 0, p.authorizationExpiry,
-            _chargeNonce(paymentId, configHash), v, r, s
-        );
+        IEIP3009(p.token)
+            .transferWithAuthorization(
+                p.payer, address(this), p.amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
+            );
 
         _safeTransfer(p.token, p.payee, p.amount);
 
@@ -441,14 +443,10 @@ contract RAIL0 {
     ///         has a unique, deterministic nonce — preventing replay and double-spending
     ///         of the same refund position. Only `p.payee` may submit; funds always reach
     ///         `p.payer`.
-    function refund(
-        bytes32 paymentId,
-        Payment calldata p,
-        uint256 amount,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external nonReentrant {
+    function refund(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+        external
+        nonReentrant
+    {
         if (msg.sender != p.payee) revert NotPayee();
         PaymentState memory st = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
@@ -471,15 +469,18 @@ contract RAIL0 {
 
         // Pull funds from payee using their EIP-3009 signature — no allowance needed.
         // validBefore = p.refundExpiry ensures the signature is dead once the refund window closes.
-        IEIP3009(p.token).receiveWithAuthorization(
-            p.payee,
-            address(this),
-            amount,
-            0,                   // validAfter: available immediately
-            p.refundExpiry,      // validBefore: same as on-chain refund deadline
-            _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
-            v, r, s
-        );
+        IEIP3009(p.token)
+            .receiveWithAuthorization(
+                p.payee,
+                address(this),
+                amount,
+                0, // validAfter: available immediately
+                p.refundExpiry, // validBefore: same as on-chain refund deadline
+                _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
+                v,
+                r,
+                s
+            );
 
         _safeTransfer(p.token, p.payer, amount);
 
@@ -595,15 +596,7 @@ contract RAIL0 {
 
     function _hash(Payment calldata p) internal view returns (bytes32) {
         bytes32 structHash = keccak256(
-            abi.encode(
-                _PAYMENT_TYPEHASH,
-                p.payer,
-                p.payee,
-                p.token,
-                p.amount,
-                p.authorizationExpiry,
-                p.refundExpiry
-            )
+            abi.encode(_PAYMENT_TYPEHASH, p.payer, p.payee, p.token, p.amount, p.authorizationExpiry, p.refundExpiry)
         );
         return keccak256(abi.encodePacked(hex"1901", _domainSeparator(), structHash));
     }

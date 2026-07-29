@@ -129,6 +129,26 @@ contract MockERC20 {
 
 /// Token with working EIP-3009 but whose `transfer` returns false. Used to verify
 /// that `_safeTransfer` reverts with `TransferFailed` on bool=false return.
+/// Token that blocks transfers to ONE address, the way an issuer blacklist does
+/// (USDC's `blacklist(addr)`). Distinct from MockTransferFails, which blocks every
+/// transfer: the point here is that the payee side keeps working while the payer side
+/// does not, which is what makes the escrow reachable only via capture. See
+/// test_FrozenBuyer_EscrowIsStuckAfterExpiry.
+contract MockBlacklistsAddress is MockERC20 {
+    address public blocked;
+
+    function blacklist(address a) external {
+        blocked = a;
+    }
+
+    function transfer(address to, uint256 amount) external override returns (bool) {
+        if (to == blocked) return false;
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 contract MockTransferFails is MockERC20 {
     function transfer(address, uint256) external pure override returns (bool) {
         return false;
@@ -958,8 +978,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
         bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
+        (uint8 v, bytes32 r, bytes32 s) = _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 0, v, r, s);
@@ -1356,11 +1375,7 @@ contract RAIL0Test is Test {
     //  Validation
     // ============================================================
 
-    function _signForAuthorize(RAIL0.Payment memory p)
-        internal
-        view
-        returns (uint8 v, bytes32 r, bytes32 s)
-    {
+    function _signForAuthorize(RAIL0.Payment memory p) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         return _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
@@ -1581,6 +1596,63 @@ contract RAIL0Test is Test {
         r.void(PAYMENT_ID, p);
     }
 
+    /// ACCEPTED RISK, pinned so a future change surfaces it (#39).
+    ///
+    /// Every buyer-bound payout is `_safeTransfer(p.token, p.payer, …)` with no alternate
+    /// recipient. If the token issuer freezes the PAYER after authorize, `void` and
+    /// `release` both revert inside the transfer — and once `authorizationExpiry` passes,
+    /// `capture` is closed too, so the escrow has no on-chain path out at all.
+    ///
+    /// The mirror case (a frozen MERCHANT) is documented in the README as an escape
+    /// hatch, because `void`/`release` still reach the buyer. This direction has no
+    /// equivalent, and the only mitigation is timing: capture before the deadline.
+    function test_FrozenBuyer_EscrowIsStuckAfterExpiry() public {
+        MockBlacklistsAddress frozen = new MockBlacklistsAddress();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(frozen);
+        RAIL0 r = new RAIL0(tokens);
+
+        frozen.mint(payer, 1000e6);
+        RAIL0.Payment memory p = _payment();
+        p.token = address(frozen);
+        bytes32 cfg = r.hashPayment(p);
+        bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
+        (uint8 v, bytes32 rr, bytes32 ss) =
+            _sign3009(payerKey, frozen, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        vm.prank(payee);
+        r.authorize(PAYMENT_ID, p, v, rr, ss);
+
+        // The issuer freezes the buyer. EIP-3009 already pulled the funds, so the escrow
+        // is held by RAIL0 and only the OUTBOUND path to the payer is blocked.
+        frozen.blacklist(payer);
+
+        // Both buyer-bound exits fail: the transfer to the payer returns false.
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.TransferFailed.selector);
+        r.void(PAYMENT_ID, p);
+
+        // The mitigation, while it lasts: capture still settles to the PAYEE, whose
+        // address is not blocked. This is the only way the funds move at all.
+        vm.prank(payee);
+        r.capture(PAYMENT_ID, p, 1);
+        assertEq(frozen.balanceOf(payee), 1, "capture must still reach an unfrozen payee");
+
+        // After the deadline every door is shut.
+        vm.warp(authorizationExpiry);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.AuthorizationExpired.selector);
+        r.capture(PAYMENT_ID, p, 1);
+
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.TransferFailed.selector);
+        r.release(PAYMENT_ID, p);
+
+        // …and the escrow is still there, unreachable.
+        RAIL0.PaymentState memory st = r.getPaymentState(PAYMENT_ID);
+        assertGt(st.capturableAmount, 0, "escrow remains, with no path out: the accepted risk");
+    }
+
     function test_SafeTransfer_AcceptsNonReturningToken() public {
         // USDT-mainnet style: `transfer` returns NO data. _safeTransfer must accept it
         // (the `data.length == 0` branch — success, no bool to decode), so an outbound
@@ -1614,9 +1686,7 @@ contract RAIL0Test is Test {
 
         // Mock token.transfer(payer, 50e6) to return false.
         vm.mockCall(
-            address(token),
-            abi.encodeWithSelector(IERC20.transfer.selector, payer, uint256(50e6)),
-            abi.encode(false)
+            address(token), abi.encodeWithSelector(IERC20.transfer.selector, payer, uint256(50e6)), abi.encode(false)
         );
 
         vm.expectRevert(RAIL0.TransferFailed.selector);
@@ -1640,12 +1710,7 @@ contract RAIL0Test is Test {
         // Outer call: authorize for paymentId. Inner reentry: another authorize for a
         // different paymentId. The reentrancy guard should reject the inner call.
         bytes memory payload = abi.encodeWithSelector(
-            r.authorize.selector,
-            keccak256("attack-pid"),
-            p,
-            uint8(27),
-            bytes32(0),
-            bytes32(0)
+            r.authorize.selector, keccak256("attack-pid"), p, uint8(27), bytes32(0), bytes32(0)
         );
         evil.arm(address(r), payload);
 
@@ -1707,20 +1772,36 @@ contract RAIL0Test is Test {
 
     /// Re-declared locally: vm.expectEmit needs the event in the test's scope.
     event PaymentCaptured(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentVoided(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentReleased(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentRefunded(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
 
     function test_Event_Capture_Partial_CarriesPostBalances() public {
