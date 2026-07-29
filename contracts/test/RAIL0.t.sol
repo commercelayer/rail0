@@ -1439,18 +1439,71 @@ contract RAIL0Test is Test {
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
-    function test_Validation_AcceptsExpiriesEqual() public {
-        // authorizationExpiry == refundExpiry should be allowed
-        // (the contract uses `>` not `>=` in the ordering check).
+    /// Equal expiries are now REJECTED. They used to be accepted — the ordering check
+    /// uses `>`, not `>=` — which collapsed the refund/dispute window to zero: both
+    /// become unreachable the instant the authorization ends, so the payment was
+    /// refundable in name only. (#41)
+    function test_Validation_RejectsExpiriesEqual() public {
         RAIL0.Payment memory p = _payment();
-        uint48 t = uint48(block.timestamp + 1 hours);
+        uint48 t = uint48(block.timestamp + 10 days);
         p.authorizationExpiry = t;
         p.refundExpiry = t;
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
+    }
+
+    /// The boundary, both sides. Exactly MIN_REFUND_WINDOW is accepted; one second
+    /// under is not — so the constant is the real gate, not an approximation of one.
+    function test_Validation_RefundWindowBoundary() public {
+        uint48 authExpiry = uint48(block.timestamp + 10 days);
+
+        RAIL0.Payment memory ok = _payment();
+        ok.authorizationExpiry = authExpiry;
+        ok.refundExpiry = authExpiry + rail0.MIN_REFUND_WINDOW();
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(ok);
+        vm.prank(payee);
+        rail0.authorize(PAYMENT_ID, ok, v, r, s);
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
+
+        RAIL0.Payment memory tooTight = _payment();
+        tooTight.authorizationExpiry = authExpiry;
+        tooTight.refundExpiry = authExpiry + rail0.MIN_REFUND_WINDOW() - 1;
+        (v, r, s) = _signForAuthorize(tooTight);
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.authorize(keccak256("too-tight"), tooTight, v, r, s);
+    }
+
+    /// charge shares _validatePayment, so it must reject the same shapes — pinned
+    /// because a validation added to only one entrypoint is the classic miss.
+    function test_Validation_ChargeRejectsACollapsedRefundWindow() public {
+        RAIL0.Payment memory p = _payment();
+        uint48 t = uint48(block.timestamp + 10 days);
+        p.authorizationExpiry = t;
+        p.refundExpiry = t;
+        bytes32 configHash = rail0.hashPayment(p);
+        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
+    }
+
+    /// The metric is DAYS: an hours-long window is refused even though it is non-zero.
+    function test_Validation_RejectsAnHoursLongRefundWindow() public {
+        RAIL0.Payment memory p = _payment();
+        p.authorizationExpiry = uint48(block.timestamp + 10 days);
+        p.refundExpiry = p.authorizationExpiry + 6 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
