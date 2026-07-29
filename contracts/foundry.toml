@@ -3,10 +3,15 @@ src = "src"
 out = "out"
 libs = ["lib"]
 test = "test"
-solc = "0.8.27"
+solc = "0.8.31"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+# Pinned rather than inherited from forge's default (today "prague"): the contract
+# depends on Cancun for MCOPY and, since #45, for TSTORE/TLOAD. Naming the oldest
+# fork that satisfies it keeps the bytecode deployable on every Cancun chain and stops
+# a future forge default from silently raising the requirement.
+evm_version = "cancun"
 verbosity = 2
 fs_permissions = [{ access = "read", path = "./" }]
 
