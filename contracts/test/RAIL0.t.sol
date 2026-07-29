@@ -2209,11 +2209,16 @@ contract RAIL0Test is Test {
     // must mirror) rather than against a hand-written literal.
 
     /// Re-declared locally: vm.expectEmit needs the event in the test's scope.
+    ///
+    /// These doubles as a golden signature check. Narrowing `amount` in the contract
+    /// made all four of these tests fail until they were narrowed too — which is the
+    /// clearest local evidence that topic0 changed, and why this cannot ship without a
+    /// version bump and a reindex. (#47)
     event PaymentCaptured(
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2221,7 +2226,7 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2229,7 +2234,7 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2237,7 +2242,7 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
