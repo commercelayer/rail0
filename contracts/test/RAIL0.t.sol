@@ -958,8 +958,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
         bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
-        (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
+        (uint8 v, bytes32 r, bytes32 s) = _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 0, v, r, s);
@@ -1356,11 +1355,7 @@ contract RAIL0Test is Test {
     //  Validation
     // ============================================================
 
-    function _signForAuthorize(RAIL0.Payment memory p)
-        internal
-        view
-        returns (uint8 v, bytes32 r, bytes32 s)
-    {
+    function _signForAuthorize(RAIL0.Payment memory p) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         return _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
@@ -1614,9 +1609,7 @@ contract RAIL0Test is Test {
 
         // Mock token.transfer(payer, 50e6) to return false.
         vm.mockCall(
-            address(token),
-            abi.encodeWithSelector(IERC20.transfer.selector, payer, uint256(50e6)),
-            abi.encode(false)
+            address(token), abi.encodeWithSelector(IERC20.transfer.selector, payer, uint256(50e6)), abi.encode(false)
         );
 
         vm.expectRevert(RAIL0.TransferFailed.selector);
@@ -1640,12 +1633,7 @@ contract RAIL0Test is Test {
         // Outer call: authorize for paymentId. Inner reentry: another authorize for a
         // different paymentId. The reentrancy guard should reject the inner call.
         bytes memory payload = abi.encodeWithSelector(
-            r.authorize.selector,
-            keccak256("attack-pid"),
-            p,
-            uint8(27),
-            bytes32(0),
-            bytes32(0)
+            r.authorize.selector, keccak256("attack-pid"), p, uint8(27), bytes32(0), bytes32(0)
         );
         evil.arm(address(r), payload);
 
@@ -1707,20 +1695,36 @@ contract RAIL0Test is Test {
 
     /// Re-declared locally: vm.expectEmit needs the event in the test's scope.
     event PaymentCaptured(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentVoided(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentReleased(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
     event PaymentRefunded(
-        bytes32 indexed paymentId, address indexed payer, address indexed payee,
-        uint256 amount, uint120 capturableAmount, uint120 refundableAmount
+        bytes32 indexed paymentId,
+        address indexed payer,
+        address indexed payee,
+        uint256 amount,
+        uint120 capturableAmount,
+        uint120 refundableAmount
     );
 
     function test_Event_Capture_Partial_CarriesPostBalances() public {
