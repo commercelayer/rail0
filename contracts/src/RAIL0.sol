@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.31;
 
 import { IEIP3009 } from "./interfaces/IEIP3009.sol";
 import { IERC20 } from "./interfaces/IERC20.sol";

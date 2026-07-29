@@ -26,13 +26,13 @@ _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) trans
 - **One signature, no allowance.** Buyers sign an EIP-3009 `TransferWithAuthorization` off-chain; merchants submit and pay gas. No `approve`, no standing allowance for either party.
 - **Card-network primitives on-chain.** `authorize → capture → refund`, plus `charge`, `void`, `release`, and a signal-only `dispute`.
 - **Time-based recourse only.** `release` (after `authorizationExpiry`) and the merchant's discretionary `refund` are the only paths that return funds to the buyer; there is no arbitration layer.
-- **Portable.** Runs on any EVM that compiles Solidity 0.8.28 with EIP-3009-capable tokens.
+- **Portable.** Runs on any EVM that compiles Solidity 0.8.31 with EIP-3009-capable tokens.
 
 ## Supported chains
 
 _rail0_ has two hard requirements — any chain and token that meet them can run it:
 
-- **EVM-compatible.** Solidity 0.8.28 must compile and execute on the chain, targeting
+- **EVM-compatible.** Solidity 0.8.31 must compile and execute on the chain, targeting
   the **Cancun** fork — the contract uses `MCOPY` and, for its reentrancy lock, EIP-1153
   transient storage (`TLOAD`/`TSTORE`). Both are pinned in `foundry.toml`
   (`evm_version = "cancun"`), so a chain that predates Cancun is not a supported target.
