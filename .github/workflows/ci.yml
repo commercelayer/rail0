@@ -1,0 +1,55 @@
+# Format, build, lint and test on every push and pull request.
+#
+# Until now this repo had no CI at all — no .github directory. A regression in the
+# 113-test suite, or drift in the carefully tuned [fmt]/[lint] config in
+# contracts/foundry.toml, could merge unnoticed. On a contract deployed to six live
+# chains with no upgrade path, that is the wrong place to rely on whoever remembered to
+# run the commands locally. (#40)
+#
+# Two repo-specific details this has to get right:
+#
+#   * forge-std is a git SUBMODULE pinned to v1.16.1 (see .gitmodules and
+#     foundry.lock), so the checkout must be recursive — without it `forge build`
+#     fails on a missing lib.
+#   * foundry.toml lives in contracts/, not the repo root, so every forge command runs
+#     from there.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - name: Checkout (with the forge-std submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      # solc is pinned in foundry.toml (0.8.27), so this compiles with the same
+      # compiler the deployments used rather than whatever ships with the toolchain.
+      - name: Format
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
+      # The [lint] section deliberately excludes asm-keccak256 with a stated reason;
+      # running lint is what keeps that decision meaningful instead of decorative.
+      - name: Lint
+        run: forge lint
+
+      - name: Test
+        run: forge test -vvv
