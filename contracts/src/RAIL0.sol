@@ -136,8 +136,8 @@ contract RAIL0 {
         bool disputed; //   8 bits — buyer has an open dispute (signal only, no fund effect)
     }
 
-    mapping(bytes32 => PaymentState) internal _state;
-    mapping(bytes32 => bytes32) internal _configHash;
+    mapping(bytes32 => PaymentState) private _state;
+    mapping(bytes32 => bytes32) private _configHash;
 
     // ================================================================
     //  Events
@@ -256,7 +256,10 @@ contract RAIL0 {
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Only `p.payee` (the merchant) may submit; the submitter pays gas.
-    function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
+    function authorize(bytes32 paymentId, Payment calldata p, uint8 sigV, bytes32 sigR, bytes32 sigS)
+        external
+        nonReentrant
+    {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -277,9 +280,9 @@ contract RAIL0 {
                 0,
                 p.authorizationExpiry,
                 _authorizeNonce(paymentId, configHash),
-                v,
-                r,
-                s
+                sigV,
+                sigR,
+                sigS
             );
 
         emit PaymentAuthorized(paymentId, p.payer, p.payee, p);
@@ -293,7 +296,10 @@ contract RAIL0 {
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
     ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
-    function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
+    function charge(bytes32 paymentId, Payment calldata p, uint8 sigV, bytes32 sigR, bytes32 sigS)
+        external
+        nonReentrant
+    {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -305,7 +311,15 @@ contract RAIL0 {
 
         IEIP3009(p.token)
             .transferWithAuthorization(
-                p.payer, address(this), p.amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
+                p.payer,
+                address(this),
+                p.amount,
+                0,
+                p.authorizationExpiry,
+                _chargeNonce(paymentId, configHash),
+                sigV,
+                sigR,
+                sigS
             );
 
         _safeTransfer(p.token, p.payee, p.amount);
@@ -443,26 +457,26 @@ contract RAIL0 {
     ///         has a unique, deterministic nonce — preventing replay and double-spending
     ///         of the same refund position. Only `p.payee` may submit; funds always reach
     ///         `p.payer`.
-    function refund(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s)
+    function refund(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 sigV, bytes32 sigR, bytes32 sigS)
         external
         nonReentrant
     {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory st = _loadAndVerify(paymentId, p);
+        PaymentState memory s = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
-        if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
+        if (amount == 0 || amount > s.refundableAmount) revert InvalidRefundAmount();
 
         // Safe cast: amount <= refundableAmount (uint120) checked above.
         uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
         // Local reused by the storage write, the dispute-close test below and the
         // event, so the post-refund balance is read once rather than re-loaded.
-        uint120 newRefundable = st.refundableAmount - refundAmount120;
+        uint120 newRefundable = s.refundableAmount - refundAmount120;
         _state[paymentId].refundableAmount = newRefundable;
 
         // A full refund (one that zeroes refundableAmount) resolves any open dispute:
         // clear the flag and emit the close event with the reserved reason. Effects only —
         // this sits before the external calls, preserving checks-effects-interactions.
-        if (st.disputed && newRefundable == 0) {
+        if (s.disputed && newRefundable == 0) {
             _state[paymentId].disputed = false;
             emit DisputeClosed(paymentId, p.payer, p.payee, msg.sender, REASON_FULL_REFUND);
         }
@@ -476,17 +490,17 @@ contract RAIL0 {
                 amount,
                 0, // validAfter: available immediately
                 p.refundExpiry, // validBefore: same as on-chain refund deadline
-                _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
-                v,
-                r,
-                s
+                _refundNonce(paymentId, _configHash[paymentId], s.refundableAmount),
+                sigV,
+                sigR,
+                sigS
             );
 
         _safeTransfer(p.token, p.payer, amount);
 
         // Refund draws down the refundable bucket only; escrow is untouched, so
         // capturable is st.capturableAmount as loaded.
-        emit PaymentRefunded(paymentId, p.payer, p.payee, amount, st.capturableAmount, newRefundable);
+        emit PaymentRefunded(paymentId, p.payer, p.payee, amount, s.capturableAmount, newRefundable);
     }
 
     // ================================================================
