@@ -17,29 +17,22 @@ interface IERC20 {
 }
 
 /// @title IEIP3009 — Subset of EIP-3009 used by RAIL0.
-/// @dev   RAIL0 uses two EIP-3009 functions:
-///        • `transferWithAuthorization` — called by the payer (sender) for authorize/charge.
-///          The payer signs off-chain; anyone submits.
-///        • `receiveWithAuthorization`  — called by the payee (recipient) for refund.
-///          The payee signs off-chain; anyone submits. msg.sender must equal `to` (the
-///          RAIL0 contract), so the token verifies that the contract is the intended
-///          recipient before pulling funds from the payee's wallet.
-///        Both functions require the same EIP-712 `TransferWithAuthorization` typed-data
-///        signature — the only difference is who submits the transaction.
-///        USDC supports both functions on every chain it deploys to.
+/// @dev   RAIL0 uses a single EIP-3009 function, `receiveWithAuthorization`, for every
+///        signature-funded operation: authorize/charge (the payer signs) and refund
+///        (the payee signs). The signer signs an EIP-712 `ReceiveWithAuthorization`
+///        typed-data message over the TOKEN's domain — a typehash distinct from
+///        `TransferWithAuthorization`, despite the identical field list.
+///
+///        The receive variant is deliberate: the token enforces `msg.sender == to`,
+///        so a signature naming this contract as `to` can only be spent through this
+///        contract. `transferWithAuthorization` has no submitter restriction — anyone
+///        could lift a pending signature from the mempool and submit it straight to
+///        the token, stranding the funds here with no payment state (#35). It is
+///        intentionally absent from this interface so no call site can reach for it.
+///
+///        USDC (FiatTokenV2_2) supports `receiveWithAuthorization` on every chain it
+///        deploys to.
 interface IEIP3009 {
-    function transferWithAuthorization(
-        address from,
-        address to,
-        uint256 value,
-        uint256 validAfter,
-        uint256 validBefore,
-        bytes32 nonce,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external;
-
     function receiveWithAuthorization(
         address from,
         address to,
