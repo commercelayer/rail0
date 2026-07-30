@@ -477,7 +477,7 @@ contract RAIL0 {
                 amount,
                 0, // validAfter: available immediately
                 p.refundExpiry, // validBefore: same as on-chain refund deadline
-                _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
+                _refundNonce(paymentId, _configHash[paymentId], st.capturableAmount, st.refundableAmount),
                 v,
                 r,
                 s
@@ -537,15 +537,26 @@ contract RAIL0 {
     ///         `TransferWithAuthorization` for a `refund` call.
     /// @param  paymentId    The payment identifier.
     /// @param  configHash   Stored configuration hash (from `getConfigHash`).
+    /// @param  capturableAmount Current escrow balance (from `getPaymentState`).
     /// @param  refundableAmount Current refundable balance (from `getPaymentState`).
-    ///         Including this value makes each partial-refund nonce unique and ties
-    ///         the signature to a specific payment state, preventing replay.
-    function refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+    ///
+    /// @dev    BOTH balances go into the nonce, and that is what makes it unique.
+    ///
+    ///         The pair determines `amount - capturable - refundable` — how much of the
+    ///         payment has left the two live buckets. That quantity never falls: a
+    ///         capture moves value BETWEEN the buckets and leaves it flat, while every
+    ///         refund raises it by the refunded amount. So no two refunds of a payment
+    ///         can share a pre-refund pair, and no nonce repeats.
+    ///
+    ///         Deriving from `refundableAmount` alone was unsafe: a capture puts that
+    ///         balance back to a value already used, so the nonce repeats and the token
+    ///         refuses every later refund — permanently. See #36.
+    function refundNonce(bytes32 paymentId, bytes32 configHash, uint120 capturableAmount, uint120 refundableAmount)
         external
         pure
         returns (bytes32)
     {
-        return _refundNonce(paymentId, configHash, refundableAmount);
+        return _refundNonce(paymentId, configHash, capturableAmount, refundableAmount);
     }
 
     /// @notice Returns the EIP-712 domain separator for this contract on the current chain.
@@ -565,12 +576,12 @@ contract RAIL0 {
         return keccak256(abi.encode(_CHARGE_NONCE_PREFIX, paymentId, configHash));
     }
 
-    function _refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+    function _refundNonce(bytes32 paymentId, bytes32 configHash, uint120 capturableAmount, uint120 refundableAmount)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount));
+        return keccak256(abi.encode(_REFUND_NONCE_PREFIX, paymentId, configHash, capturableAmount, refundableAmount));
     }
 
     function _validatePayment(Payment calldata p) internal view {
