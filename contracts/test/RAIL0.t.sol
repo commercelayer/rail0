@@ -282,8 +282,8 @@ contract RAIL0Test is Test {
     /// Mints only the difference if payee's balance is insufficient.
     function _refund(bytes32 paymentId, RAIL0.Payment memory p, uint256 amount) internal {
         bytes32 configHash = rail0.getConfigHash(paymentId);
-        uint120 refundable = rail0.getPaymentState(paymentId).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(paymentId, configHash, refundable);
+        RAIL0.PaymentState memory st0 = rail0.getPaymentState(paymentId);
+        bytes32 nonce = rail0.refundNonce(paymentId, configHash, st0.capturableAmount, st0.refundableAmount);
         uint256 bal = token.balanceOf(payee);
         if (bal < amount) token.mint(payee, amount - bal);
         (uint8 v, bytes32 r, bytes32 s) =
@@ -750,7 +750,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
@@ -777,7 +778,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
@@ -794,7 +796,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         // Sign with payer key instead of payee key → bad sig.
         (uint8 v, bytes32 r, bytes32 s) =
@@ -812,7 +815,8 @@ contract RAIL0Test is Test {
         // First refund succeeds.
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 100e6);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
@@ -1022,7 +1026,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         (uint8 v, bytes32 r, bytes32 s) = _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
         vm.prank(payee);
@@ -1035,7 +1040,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 101e6);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 101e6, 0, p.refundExpiry, nonce);
@@ -1062,7 +1068,8 @@ contract RAIL0Test is Test {
         bad.amount = 9999e6;
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
@@ -1750,7 +1757,7 @@ contract RAIL0Test is Test {
         rail0.capture(PAYMENT_ID, p, captureAmount);
 
         RAIL0.PaymentState memory mid = rail0.getPaymentState(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, rail0.hashPayment(p), mid.refundableAmount);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, rail0.hashPayment(p), mid.capturableAmount, mid.refundableAmount);
         (uint8 v, bytes32 r, bytes32 ss) =
             _sign3009(payeeKey, token, payee, address(rail0), refundAmount, 0, refundExpiry, nonce);
         vm.prank(payee);
@@ -1823,6 +1830,90 @@ contract RAIL0Test is Test {
         rail0.capture(PAYMENT_ID, p, 1);
     }
 
+    // ============================================================
+    //  Refund-nonce uniqueness (#36)
+    // ============================================================
+
+    /// The sequence that used to brick refunds permanently.
+    ///
+    /// Deriving the nonce from `refundableAmount` alone was safe only while that balance
+    /// fell monotonically. `capture` is the one operation that raises it, so it could put
+    /// the balance back to a value already used: the nonce repeated, the token refused it
+    /// as spent, and because `capturableAmount` was by then exhausted the payee had no way
+    /// to move the balance to a fresh value. The residual was permanently non-refundable,
+    /// and an open dispute on it could never be resolved.
+    function test_Refund_SurvivesARevisitedRefundableBalance() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        bytes32 cfg = rail0.getConfigHash(PAYMENT_ID);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 50e6);
+        bytes32 firstNonce = rail0.refundNonce(PAYMENT_ID, cfg, 50e6, 50e6);
+        _refund(PAYMENT_ID, p, 50e6);
+        assertTrue(token.authorizationState(payee, firstNonce), "precondition: first nonce spent");
+
+        // Capture the rest: refundable returns to 50e6 -- the old collision point.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 50e6);
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(st.capturableAmount, 0, "escrow exhausted: the balance cannot be moved again");
+        assertEq(st.refundableAmount, 50e6, "and it is back to a value already used");
+
+        bytes32 secondNonce = rail0.refundNonce(PAYMENT_ID, cfg, 0, 50e6);
+        assertTrue(secondNonce != firstNonce, "the pair differs, so the nonce differs");
+
+        // The refund that was impossible now settles.
+        _refund(PAYMENT_ID, p, 50e6);
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 0, "fully refunded");
+    }
+
+    /// No nonce may repeat across an ARBITRARY interleaving of captures and refunds.
+    ///
+    /// The property behind it: `amount - capturable - refundable` never falls -- a capture
+    /// moves value between the buckets and leaves it flat, every refund raises it. Since
+    /// the pair determines that quantity, two refunds cannot share a pre-refund pair.
+    ///
+    /// Run against the old single-balance derivation this fails with "REPEATED nonce",
+    /// which is what makes it a regression test rather than a restatement.
+    function testFuzz_RefundNoncesNeverRepeat(uint120 a, uint120 b, uint120 c, uint120 d) public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        bytes32 cfg = rail0.getConfigHash(PAYMENT_ID);
+
+        uint120[4] memory amounts = [
+            uint120(bound(a, 1, 25e6)),
+            uint120(bound(b, 1, 25e6)),
+            uint120(bound(c, 1, 25e6)),
+            uint120(bound(d, 1, 25e6))
+        ];
+
+        bytes32[4] memory seen;
+        uint256 n;
+        uint120 prevSettled;
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            vm.prank(payee);
+            rail0.capture(PAYMENT_ID, p, amounts[i]);
+
+            RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+            assertEq(p.amount - st.capturableAmount - st.refundableAmount, prevSettled, "a capture leaves it flat");
+
+            bytes32 nonce = rail0.refundNonce(PAYMENT_ID, cfg, st.capturableAmount, st.refundableAmount);
+            for (uint256 j = 0; j < n; j++) {
+                assertTrue(nonce != seen[j], "REPEATED nonce across refunds");
+            }
+            seen[n++] = nonce;
+
+            _refund(PAYMENT_ID, p, amounts[i]);
+
+            RAIL0.PaymentState memory settled = rail0.getPaymentState(PAYMENT_ID);
+            uint120 nowSettled = p.amount - settled.capturableAmount - settled.refundableAmount;
+            assertGt(nowSettled, prevSettled, "a refund strictly raises it");
+            prevSettled = nowSettled;
+        }
+    }
+
     function test_SafeTransfer_AcceptsNonReturningToken() public {
         // USDT-mainnet style: `transfer` returns NO data. _safeTransfer must accept it
         // (the `data.length == 0` branch — success, no bool to decode), so an outbound
@@ -1849,7 +1940,8 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
@@ -2056,7 +2148,7 @@ contract RAIL0Test is Test {
         _charge(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 0, 100e6);
         (uint8 v, bytes32 r, bytes32 sig) =
             _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
@@ -2073,7 +2165,7 @@ contract RAIL0Test is Test {
         _charge(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 0, 100e6);
         (uint8 v, bytes32 r, bytes32 sig) =
             _sign3009(payeeKey, token, payee, address(rail0), 100e6, 0, p.refundExpiry, nonce);
 
