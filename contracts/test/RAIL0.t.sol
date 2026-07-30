@@ -1358,15 +1358,6 @@ contract RAIL0Test is Test {
         new RAIL0(dup);
     }
 
-    function test_Constructor_RejectsAddressWithNoCode() public {
-        // A typo'd or not-yet-deployed token address must fail at deploy, not at
-        // the first payment (where the compiler's extcodesize guard would catch it).
-        address[] memory bad = new address[](1);
-        bad[0] = makeAddr("not-a-contract");
-        vm.expectRevert(RAIL0.TokenHasNoCode.selector);
-        new RAIL0(bad);
-    }
-
     function test_Constructor_AcceptsMultipleTokens() public {
         MockERC20 t2 = new MockERC20();
         address[] memory tokens = new address[](2);

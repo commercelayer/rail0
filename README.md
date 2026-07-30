@@ -283,14 +283,13 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `NotDisputed`               | `closeDispute` called with no open dispute.                        |
 | `TokenNotAccepted`          | `p.token` is not in the deployment's allowlist.                    |
 | `DuplicateToken`            | Constructor `acceptedTokens` contained the same address twice.     |
-| `TokenHasNoCode`            | Constructor `acceptedTokens` contained an address with no contract code. |
 | `TransferFailed`            | A token `transfer` returned `false` or reverted.                   |
 | `Reentrancy`                | A nested call attempted to reenter a guarded entrypoint.           |
 
 ### Security model
 
 - **No privileged roles.** No owner, pauser, or upgrade path. Contract code and token allowlist are fixed at deploy time.
-- **Curated trust boundary.** The deployer chooses which tokens _rail0_ processes. Including a hostile or non-standard ERC-20 is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s. In particular, fee-on-transfer and rebasing tokens are **unsupported**: `charge` and `refund` forward the exact signed `amount`, so a token that delivers less than it debits would settle those transfers out of other payments' escrow. The constructor rejects addresses with no contract code (`TokenHasNoCode`), so a typo'd or not-yet-deployed token address fails at deploy rather than at the first payment.
+- **Curated trust boundary.** The deployer chooses which tokens _rail0_ processes. Including a hostile or non-standard ERC-20 is the deployer's risk to manage — the contract trusts allowlisted tokens to behave like standard ERC-20s.
 - **Reentrancy guard.** Every entrypoint that makes an external token call (`authorize`, `charge`, `capture`, `void`, `release`, `refund`) is `nonReentrant`. `dispute`/`closeDispute` make no external calls and hold no guard by design — the only fund-moving dispute path is the full-refund auto-close, which executes inside `refund`'s effects phase, already under its guard and ahead of any transfer.
 - **Checks-Effects-Interactions.** All state mutations occur before external transfers; even if the reentrancy guard were bypassed (it can't be), CEI ordering already prevents same-payment double-spending.
 - **SafeERC20-style transfers.** `_safeTransfer` accepts both bool-returning and non-returning ERC-20s and reverts with `TransferFailed` on any failure (compatible with USDT-mainnet-style tokens). Inbound pulls use EIP-3009, which revert token-side on an invalid signature.
