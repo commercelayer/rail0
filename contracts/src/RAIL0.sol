@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { IERC20, IEIP3009 } from "./interfaces/IERC20.sol";
+import { IEIP3009 } from "./interfaces/IEIP3009.sol";
+import { IERC20 } from "./interfaces/IERC20.sol";
 
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
 /// @notice Authorize, capture, void, release, and refund stablecoin payments on any
