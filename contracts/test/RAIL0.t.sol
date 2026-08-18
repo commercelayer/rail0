@@ -1548,7 +1548,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
 
         vm.prank(payee);
         vm.expectRevert(RAIL0.InvalidExpiries.selector);
