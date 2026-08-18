@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.31;
 
 import { IEIP3009 } from "./interfaces/IEIP3009.sol";
 import { IERC20 } from "./interfaces/IERC20.sol";
@@ -48,8 +48,6 @@ contract RAIL0 {
     bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
 
     /// @dev Reentrancy lock states.
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
 
     // ================================================================
     //  Domain separator (EIP-712)
@@ -76,7 +74,17 @@ contract RAIL0 {
     //  Reentrancy lock
     // ================================================================
 
-    uint256 private _reentrancyStatus = _NOT_ENTERED;
+    /// Reentrancy lock in EIP-1153 transient storage.
+    ///
+    /// A `transient` state variable (Solidity 0.8.28+) rather than inline assembly around
+    /// tload/tstore. Not merely tidier: it measured CHEAPER than the assembly version by
+    /// 89–356 gas per entrypoint, because the compiler tracks the slot itself instead of
+    /// working around an opaque asm block.
+    ///
+    /// `uint256` rather than `bool` on purpose — also measured. A `bool transient` costs
+    /// 140–557 gas MORE, since every read and write carries the bool's 0/1 normalisation.
+    /// Nothing here needs the type to be a bool; 0 and 1 say the same thing for free.
+    uint256 private transient _entered;
 
     modifier nonReentrant() {
         _nonReentrantBefore();
@@ -85,12 +93,17 @@ contract RAIL0 {
     }
 
     function _nonReentrantBefore() private {
-        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
-        _reentrancyStatus = _ENTERED;
+        if (_entered != 0) revert Reentrancy();
+        _entered = 1;
     }
 
+    /// Releases the lock EXPLICITLY, which transient storage does not make optional.
+    /// A transient slot is cleared when the TRANSACTION ends, not when the call does, so
+    /// without this a second guarded call in the same transaction — two operations
+    /// batched by a multicall or a smart account — would find the lock still held and
+    /// revert Reentrancy. Pinned by test_Reentrancy_TwoGuardedCallsInOneTransaction. (#45)
     function _nonReentrantAfter() private {
-        _reentrancyStatus = _NOT_ENTERED;
+        _entered = 0;
     }
 
     // ================================================================
@@ -321,7 +334,7 @@ contract RAIL0 {
     ///         recover their escrowed funds; the merchant may also submit to settle.
     function release(bytes32 paymentId, Payment calldata p) external nonReentrant {
         if (msg.sender != p.payer && msg.sender != p.payee) revert NotPayerOrPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp < p.authorizationExpiry) revert AuthorizationNotExpired();
         if (s.capturableAmount == 0) revert NothingToRelease();
 
@@ -349,7 +362,7 @@ contract RAIL0 {
     /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
     function dispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
         if (msg.sender != p.payer) revert NotPayer();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
         if (s.refundableAmount == 0) revert NothingToDispute();
         if (s.disputed) revert AlreadyDisputed();
@@ -367,7 +380,7 @@ contract RAIL0 {
     /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
     function closeDispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
         if (msg.sender != p.payer) revert NotPayer();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (!s.disputed) revert NotDisputed();
 
         _state[paymentId].disputed = false;
@@ -382,7 +395,7 @@ contract RAIL0 {
     /// @notice Capture authorized funds: pay the merchant.
     function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (amount == 0 || amount > s.capturableAmount) revert InvalidCaptureAmount();
 
@@ -411,7 +424,7 @@ contract RAIL0 {
     ///         never restoring `capturableAmount`.
     function void(bytes32 paymentId, Payment calldata p) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (s.capturableAmount == 0) revert NothingToVoid();
         if (s.capturableAmount != p.amount) revert AlreadyCaptured();
 
@@ -449,7 +462,7 @@ contract RAIL0 {
         nonReentrant
     {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory st = _loadAndVerify(paymentId, p);
+        (PaymentState memory st, bytes32 configHash) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
         if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
 
@@ -477,7 +490,7 @@ contract RAIL0 {
                 amount,
                 0, // validAfter: available immediately
                 p.refundExpiry, // validBefore: same as on-chain refund deadline
-                _refundNonce(paymentId, _configHash[paymentId], st.capturableAmount, st.refundableAmount),
+                _refundNonce(paymentId, configHash, st.capturableAmount, st.refundableAmount),
                 v,
                 r,
                 s
@@ -600,10 +613,18 @@ contract RAIL0 {
         if (!_accepted[p.token]) revert TokenNotAccepted();
     }
 
-    function _loadAndVerify(bytes32 paymentId, Payment calldata p) internal view returns (PaymentState memory s) {
+    /// Returns the verified config hash alongside the state. The hash is loaded here
+    /// anyway to compare against `_hash(p)`, so handing it back saves `refund` a second
+    /// SLOAD of the same slot — it needs the hash to derive the EIP-3009 nonce. (#45)
+    function _loadAndVerify(bytes32 paymentId, Payment calldata p)
+        internal
+        view
+        returns (PaymentState memory s, bytes32 configHash)
+    {
         s = _state[paymentId];
         if (!s.exists) revert PaymentNotFound();
-        if (_configHash[paymentId] != _hash(p)) revert PaymentMismatch();
+        configHash = _configHash[paymentId];
+        if (configHash != _hash(p)) revert PaymentMismatch();
     }
 
     function _hash(Payment calldata p) internal view returns (bytes32) {

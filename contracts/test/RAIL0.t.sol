@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.31;
 
 import { Test } from "forge-std/Test.sol";
 import { Vm } from "forge-std/Vm.sol";
@@ -1914,6 +1914,38 @@ contract RAIL0Test is Test {
         }
     }
 
+    /// A SUCCESSFUL capture must leave an open dispute open. `capturableAmount` and
+    /// `refundableAmount` share a packed slot with `exists` and `disputed`, so any change
+    /// to how that slot is written risks carrying the neighbours with it.
+    ///
+    /// Written while evaluating a whole-struct write for #45 — which was measured and
+    /// REJECTED for costing gas — but kept, because the pin is valuable independently
+    /// and nothing else covered it. test_Capture_IsNotBlockedByAnOpenDispute does not:
+    /// it charges first, so there is nothing capturable and the capture reverts, meaning
+    /// a dropped `disputed` would survive it untouched.
+    function test_Capture_PreservesAnOpenDispute() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // A dispute needs a refundable balance, so capture part of the escrow first.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 40e6);
+
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, bytes32(uint256(1)));
+        assertTrue(rail0.getPaymentState(PAYMENT_ID).disputed, "precondition: dispute open");
+
+        // A second, successful capture — escrow remains, so this one goes through.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 10e6);
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertTrue(st.disputed, "the whole-slot write must not clear an open dispute");
+        assertTrue(st.exists, "nor the exists flag");
+        assertEq(st.capturableAmount, 50e6, "escrow reduced by both captures");
+        assertEq(st.refundableAmount, 50e6, "and moved to the refundable bucket");
+    }
+
     function test_SafeTransfer_AcceptsNonReturningToken() public {
         // USDT-mainnet style: `transfer` returns NO data. _safeTransfer must accept it
         // (the `data.length == 0` branch — success, no bool to decode), so an outbound
@@ -1959,6 +1991,29 @@ contract RAIL0Test is Test {
     // ============================================================
     //  Reentrancy
     // ============================================================
+
+    /// Transient storage clears at the end of the TRANSACTION, not the call, so the
+    /// guard must release the lock explicitly (#45). Without that, the first guarded
+    /// call in a transaction would poison every later one.
+    ///
+    /// Two captures in a single transaction — the shape a multicall or a smart-account
+    /// batch produces. Both must go through. This is the regression the move from
+    /// storage to transient storage makes possible, and nothing else in the suite would
+    /// notice it: every other test makes one guarded call per transaction.
+    function test_Reentrancy_TwoGuardedCallsInOneTransaction() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // No vm.prank between them: one broadcast, two guarded entrypoints.
+        vm.startPrank(payee);
+        rail0.capture(PAYMENT_ID, p, 10e6);
+        rail0.capture(PAYMENT_ID, p, 15e6);
+        vm.stopPrank();
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(st.capturableAmount, 75e6, "both captures must have applied");
+        assertEq(st.refundableAmount, 25e6);
+    }
 
     function test_Reentrancy_GuardBlocksInnerCall() public {
         MockReentrant evil = new MockReentrant();

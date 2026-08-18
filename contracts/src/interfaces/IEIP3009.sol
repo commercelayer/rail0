@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.31;
 
 /// @title IEIP3009 — Subset of EIP-3009 used by RAIL0.
 /// @dev   RAIL0 uses two EIP-3009 functions. In BOTH cases the caller is RAIL0 itself:
