@@ -26,6 +26,20 @@ contract RAIL0 {
     ///      Lets indexers distinguish a refund-driven close from a buyer withdrawal.
     bytes32 public constant REASON_FULL_REFUND = keccak256("rail0.dispute.full_refund");
 
+    /// Minimum gap the contract requires between `authorizationExpiry` and
+    /// `refundExpiry`, so every payment carries a refund/dispute window that is
+    /// actually usable.
+    ///
+    /// Days, not hours: the window has to survive a buyer noticing a problem, a
+    /// merchant responding and a transaction confirming — a window measured in hours
+    /// is one the buyer can lose to a weekend. One day is a FLOOR against a collapsed
+    /// window, not a recommendation; the README's guidance remains 14–30 days aligned
+    /// with consumer-protection practice.
+    ///
+    /// Chosen so it cannot reject what integrators already produce: the gateway's
+    /// defaults are a 7-day authorization and a 30-day refund window, a 23-day gap.
+    uint48 public constant MIN_REFUND_WINDOW = 1 days;
+
     /// @dev EIP-712 typehash for the EIP712Domain struct.
     bytes32 internal constant _DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -608,6 +622,15 @@ contract RAIL0 {
         if (p.amount == 0) revert InvalidAmount();
         if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
+        // A refund/dispute window of at least MIN_REFUND_WINDOW. The ordering check
+        // above is what makes this subtraction safe — refundExpiry >= authorizationExpiry
+        // is already guaranteed, so it cannot underflow.
+        //
+        // Without it, equal expiries were accepted (the ordering check uses `>`, not
+        // `>=`), which collapses the window to zero: refund and dispute both become
+        // unreachable the instant the authorization ends, so a payment could be created
+        // that is refundable in name only.
+        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
