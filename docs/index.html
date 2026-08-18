@@ -367,8 +367,9 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
               <span>shell</span>
               <span>refund</span>
             </div>
-            <pre><span class="c"># 1. Refund nonce for the CURRENT refundable balance (here: 50 USDC)</span>
-NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"refundNonce(bytes32,bytes32,uint120)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH 50000000 --rpc-url $RPC)
+            <pre><span class="c"># 1. Refund nonce for the CURRENT balances (escrow left, refundable left) — both</span>
+<span class="c">#    go into the nonce; read them from getPaymentState. Here: 0 and 50 USDC.</span>
+NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"refundNonce(bytes32,bytes32,uint120,uint120)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH 0 50000000 --rpc-url $RPC)
 
 <span class="c"># 2. Merchant signs the EIP-3009 digest (validBefore = p.refundExpiry)</span>
 SIG=$(<span class="k">cast wallet sign</span> --no-hash --private-key $PAYEE_KEY $DIGEST)

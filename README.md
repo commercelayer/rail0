@@ -222,7 +222,7 @@ The domain separator is cached at construction and rebuilt automatically if `blo
 - `DOMAIN_SEPARATOR()` — current EIP-712 domain separator (for `Payment` hashing; the buyer signs over the _token's_ domain).
 - `hashPayment(p)` — Payment digest (also stored on-chain as configHash).
 - `authorizeNonce(paymentId, configHash)` / `chargeNonce(paymentId, configHash)` — EIP-3009 nonces for `authorize` / `charge`.
-- `refundNonce(paymentId, configHash, refundableAmount)` — EIP-3009 nonce for `refund`; encodes the current `refundableAmount`, so each partial refund has a distinct, replay-proof nonce.
+- `refundNonce(paymentId, configHash, capturableAmount, refundableAmount)` — EIP-3009 nonce for `refund`; encodes BOTH current balances, so each partial refund has a distinct, replay-proof nonce. Both are needed: `refundableAmount` alone is not monotonic (a capture raises it), so it could revisit a value already spent.
 
 ### Allowance requirements
 
@@ -398,9 +398,10 @@ cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
 Pulls from the merchant's own wallet back to the buyer — no allowance, no `approve`.
 
 ```sh
-# 1. Refund nonce for the CURRENT refundable balance (here: a full 50000000 refund)
-NONCE=$(cast call $RAIL0 "refundNonce(bytes32,bytes32,uint120)(bytes32)" \
-  $PAYMENT_ID $CONFIG_HASH 50000000 --rpc-url $RPC)
+# 1. Refund nonce for the CURRENT balances (here: nothing left in escrow, a full
+#    50000000 refundable). Read them from getPaymentState — both go into the nonce.
+NONCE=$(cast call $RAIL0 "refundNonce(bytes32,bytes32,uint120,uint120)(bytes32)" \
+  $PAYMENT_ID $CONFIG_HASH 0 50000000 --rpc-url $RPC)
 
 # 2. EIP-3009 digest over the TOKEN's domain. value = 50000000, validAfter = 0,
 #    validBefore = $REFUND_EXPIRY.
