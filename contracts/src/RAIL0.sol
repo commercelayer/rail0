@@ -7,7 +7,7 @@ import { IERC20 } from "./interfaces/IERC20.sol";
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
 /// @notice Authorize, capture, void, release, and refund stablecoin payments on any
 ///         EVM-compatible chain whose accepted tokens implement EIP-3009
-///         (`transferWithAuthorization`). Buyer-funded operations use a single
+///         (`receiveWithAuthorization`). Buyer-funded operations use a single
 ///         EIP-3009 signature: the buyer signs off-chain and the merchant submits the
 ///         transaction and pays gas natively, so no token allowance state is touched.
 ///         Every operation is merchant-submitted, except `release`, which the payer or
@@ -112,7 +112,7 @@ contract RAIL0 {
 
     /// @param acceptedTokens Token addresses this deployment will accept on `Payment.token`.
     ///                       Each entry must be non-zero and unique. The list is fixed forever.
-    ///                       Tokens MUST implement EIP-3009 (`transferWithAuthorization`).
+    ///                       Tokens MUST implement EIP-3009 (`receiveWithAuthorization`).
     constructor(address[] memory acceptedTokens) {
         _CACHED_CHAIN_ID = block.chainid;
         _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
@@ -261,7 +261,7 @@ contract RAIL0 {
     // ================================================================
 
     /// @notice Authorize funds: pull `p.amount` from buyer into escrow.
-    /// @dev    The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's
+    /// @dev    The buyer signs an EIP-3009 `ReceiveWithAuthorization` over the token's
     ///         domain with `from = p.payer`, `to = address(this)`, `value = p.amount`,
     ///         `validAfter = 0`, `validBefore = p.authorizationExpiry`, and
     ///         `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
@@ -270,6 +270,13 @@ contract RAIL0 {
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Only `p.payee` (the merchant) may submit; the submitter pays gas.
+    ///
+    ///         The RECEIVE variant, not the transfer one, on purpose: the token enforces
+    ///         `msg.sender == to` on `receiveWithAuthorization`, so the signature is only
+    ///         spendable through this contract. A `TransferWithAuthorization` signature
+    ///         could be lifted from the mempool and submitted straight to the token by
+    ///         anyone — funds would land here with no `PaymentState` ever created, and no
+    ///         payout path can reach them (#35).
     function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
@@ -284,7 +291,7 @@ contract RAIL0 {
         // any Payment field changes the configHash, which changes the nonce, which
         // makes the recovered signer differ from `p.payer`, causing the token to revert.
         IEIP3009(p.token)
-            .transferWithAuthorization(
+            .receiveWithAuthorization(
                 p.payer,
                 address(this),
                 p.amount,
@@ -300,10 +307,10 @@ contract RAIL0 {
     }
 
     /// @notice One-shot: authorize and immediately capture (no hold).
-    /// @dev    Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and
-    ///         `validBefore = p.authorizationExpiry` baked into the buyer's signed
-    ///         payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an authorize-
-    ///         signature can't be repurposed for charge (and vice versa). Here
+    /// @dev    Same EIP-3009 `ReceiveWithAuthorization` pattern as `authorize` (including
+    ///         `validAfter = 0` and `validBefore = p.authorizationExpiry` baked into the
+    ///         buyer's signed payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an
+    ///         authorize-signature can't be repurposed for charge (and vice versa). Here
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
     ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
@@ -318,7 +325,7 @@ contract RAIL0 {
             PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount, disputed: false });
 
         IEIP3009(p.token)
-            .transferWithAuthorization(
+            .receiveWithAuthorization(
                 p.payer, address(this), p.amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
             );
 
@@ -440,7 +447,7 @@ contract RAIL0 {
 
     /// @notice Refund a previously captured amount from the merchant's wallet.
     /// @dev    Uses EIP-3009 `receiveWithAuthorization` — the payee signs a
-    ///         `TransferWithAuthorization` digest off-chain; RAIL0 calls
+    ///         `ReceiveWithAuthorization` digest off-chain; RAIL0 calls
     ///         `receiveWithAuthorization` to pull funds from the payee directly into
     ///         this contract, then immediately forwards them to the payer. No ERC-20
     ///         allowance (`approve`) is needed.
