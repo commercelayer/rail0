@@ -1,0 +1,35 @@
+{
+  // Pin the editor to the SAME compiler the project builds with.
+  //
+  // contracts/foundry.toml pins `solc = "0.8.31"` and forge fetches it, so the
+  // command line has always been correct. An editor extension, though, uses the
+  // compiler it ships with — and while the pragma was `^0.8.31` it happily
+  // compiled these files with whatever newer 0.8.x that happened to be, producing
+  // different bytecode than the deployed artifact and saying nothing about it.
+  // That silent divergence is what issue #43 was about.
+  //
+  // With the pragma now `=0.8.31`, a mismatched extension reports:
+  //
+  //   Source file requires different compiler version (current compiler is
+  //   0.8.36+commit.8a079791.Emscripten.clang)
+  //
+  // which is the pin working, not a fault. The fix is to point the editor at
+  // 0.8.31 rather than to install something newer — newer is the problem.
+  //
+  // Both keys are here because the two common extensions read different ones;
+  // whichever you don't have simply ignores its key. The exact build is the one
+  // forge used, read back from the compiled artifact's metadata rather than
+  // typed from memory.
+
+  // Juan Blanco's `solidity` extension.
+  "solidity.compileUsingRemoteVersion": "v0.8.31+commit.fd3a2265",
+
+  // Nomic Foundation's `hardhat-solidity` / Solidity extension.
+  "solidity.compilerVersion": "0.8.31",
+
+  // Foundry formats this repo (`forge fmt`), so the editor must not reformat
+  // Solidity on save with its own rules — that fights `forge fmt --check` in CI.
+  "[solidity]": {
+    "editor.formatOnSave": false
+  }
+}
