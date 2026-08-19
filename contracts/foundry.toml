@@ -26,14 +26,29 @@ bracket_spacing = true
 # inline assembly hurts readability — not worth the trade.
 exclude_lints = ["asm-keccak256"]
 
+# The DEPLOYMENT SET, and only it. Every chain the README lists as Live gets an RPC
+# and a verifier here, so a redeploy or a verification runs from this file instead of
+# out-of-band URLs. Chains that do not run RAIL0 are deliberately absent — listing
+# them advertised support that does not exist: Tempo cannot run it at all (TIP-20 has
+# no EIP-3009), Plasma's testnet is still Planned, and Moderato appeared nowhere in
+# the README. Every chain id below was checked against its endpoint's eth_chainId.
 [rpc_endpoints]
-moderato        = "https://rpc.moderato.tempo.xyz"
-tempo           = "https://rpc.tempo.xyz"
-arc-testnet     = "https://rpc.testnet.arc.network"
-plasma-testnet  = "https://testnet-rpc.plasma.to"
-celo-sepolia    = "https://forno.celo-sepolia.celo-testnet.org"
+arbitrum-sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
+arc-testnet      = "https://rpc.testnet.arc.network"
+base-sepolia     = "https://sepolia.base.org"
+celo-sepolia     = "https://forno.celo-sepolia.celo-testnet.org"
+optimism-sepolia = "https://sepolia.optimism.io"
+polygon-amoy     = "https://polygon-amoy.drpc.org"
 
+# Five of the six explorers are Blockscout, which verifies with no API key — the
+# `/api/` suffix is the verifier endpoint, not the browse URL, and each was confirmed
+# to answer. Polygon Amoy is the exception and the reason `key` is not simply "" for
+# every row: Polygonscan's V1 API is retired, so Amoy goes through Etherscan's V2
+# endpoint, the only entry here that needs a key.
 [etherscan]
-tempo         = { url = "https://contracts.tempo.xyz",              chain = 4217,     key = "" }
-moderato      = { url = "https://contracts.tempo.xyz",              chain = 42431,    key = "" }
-celo-sepolia  = { url = "https://celo-sepolia.blockscout.com/api/", chain = 11142220, key = "" }
+arbitrum-sepolia = { url = "https://arbitrum-sepolia.blockscout.com/api/", chain = 421614,   key = "" }
+arc-testnet      = { url = "https://testnet.arcscan.app/api/",             chain = 5042002,  key = "" }
+base-sepolia     = { url = "https://base-sepolia.blockscout.com/api/",     chain = 84532,    key = "" }
+celo-sepolia     = { url = "https://celo-sepolia.blockscout.com/api/",     chain = 11142220, key = "" }
+optimism-sepolia = { url = "https://testnet-explorer.optimism.io/api/",    chain = 11155420, key = "" }
+polygon-amoy     = { url = "https://api.etherscan.io/v2/api",              chain = 80002,    key = "${ETHERSCAN_API_KEY}" }

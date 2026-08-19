@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.31;
+pragma solidity =0.8.31;
 
 /// @title IERC20 — Minimal ERC-20 interface used by RAIL0.
 /// @dev   Some tokens (e.g. USDT on Ethereum mainnet) do not return a bool from
