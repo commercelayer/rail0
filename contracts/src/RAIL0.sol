@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.31;
+pragma solidity =0.8.31;
 
 import { IEIP3009 } from "./interfaces/IEIP3009.sol";
 import { IERC20 } from "./interfaces/IERC20.sol";
@@ -472,7 +472,7 @@ contract RAIL0 {
     ///           value       = amount
     ///           validAfter  = 0
     ///           validBefore = p.refundExpiry
-    ///           nonce       = refundNonce(paymentId, configHash, refundableAmount)
+    ///           nonce       = refundNonce(paymentId, configHash, capturableAmount, refundableAmount)
     ///
     ///         The nonce encodes the current `refundableAmount` so each partial refund
     ///         has a unique, deterministic nonce — preventing replay and double-spending

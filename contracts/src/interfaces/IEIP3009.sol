@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.31;
+pragma solidity =0.8.31;
 
 /// @title IEIP3009 — Subset of EIP-3009 used by RAIL0.
 /// @dev   RAIL0 uses ONE EIP-3009 function, `receiveWithAuthorization`, for every
