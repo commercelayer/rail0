@@ -171,6 +171,8 @@ Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no f
 
 A dispute opened but never resolved before `refundExpiry` stays `disputed == true` permanently — like every time bound in _rail0_, `refundExpiry` is a guard, not a state transition. Off-chain systems read `disputed && now ≥ refundExpiry` to interpret it as "contested, never resolved on-chain within the window."
 
+**Past `refundExpiry` the two parties no longer hold the same options.** `closeDispute` has no window, so the payer can always withdraw. The merchant's only close path is the full-refund auto-close, which lives inside `refund` and dies with it at `refundExpiry`. So a dispute opened in the last moments of the window — even one the merchant would gladly refund — can from then on be cleared **only by the buyer**. This is an accepted property, not an oversight; see the Security model note below.
+
 ### The `Payment` struct
 
 A payment's terms are committed at authorization time and immutable thereafter. The struct is passed in calldata on every call and verified against a stored hash.
@@ -299,6 +301,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound and is the `validBefore` pinned into the merchant's refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature). Best practice is bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not far-future `refundExpiry`.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Disputes are signal, not arbitration.** The protocol has no arbitration layer: the only on-chain mechanisms that move funds back to the buyer are `release` (uncaptured escrow, after `authorizationExpiry`) and the merchant's discretionary `refund`. The `dispute` lifecycle adds a censorship-resistant record with **no fund effect**. Because a dispute carries no financial payoff, friendly-fraud abuse is structurally neutralized on-chain; detection and reaction belong off-chain.
+- **A dispute opened at the edge of the window is buyer-closable only — accepted.** `dispute` is allowed right up to `refundExpiry`, and the merchant's only way to clear the flag is the full-refund auto-close inside `refund`, which is itself gated on `refundExpiry` (`test_Refund_RevertsAtRefundExpiry`). Open a dispute in the final block of the window and from the next one the merchant has **no on-chain action that closes it**: `closeDispute` is payer-only, deliberately and without a window, because withdrawing is always benign (`test_CloseDispute_AllowedAfterRefundExpiry`). No funds are affected — the flag never had a fund effect — but every off-chain reader shows a permanently contested payment and only the buyer can change that. Accepted rather than fixed because both alternatives are worse: requiring a minimum gap before `refundExpiry` would withdraw the buyer's protection exactly late in the window, which is when a buyer is most likely to notice a problem, and letting a refund close a dispute after `refundExpiry` would mean a fund-moving path outliving its own deadline. The mitigation is the same one that serves the refund window generally — react to `PaymentDisputed` well before the deadline rather than at it.
 - **Test coverage.** A comprehensive Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path (incl. `AlreadyCaptured` on `void` after a capture), submitter-authorization gates, the dispute open/close lifecycle, EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification, `_safeTransfer` failure handling, boundary conditions, and reentrancy attempts via a malicious mock token. **No external audit has been completed yet — formal audits are underway and reports will be published once available.**
 
 ### Limits
@@ -443,6 +446,20 @@ cast call $RAIL0 "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC
 cast call $RAIL0 "isAcceptedToken(address)(bool)" $TOKEN --rpc-url $RPC
 cast call $RAIL0 "acceptedTokens()(address[])" --rpc-url $RPC
 ```
+
+#### `getPaymentState` is a cross-version compatibility surface
+
+It is not only a convenience view. **`getPaymentState(bytes32)` returns `(bool, uint120, uint120)`, and other repos depend on that shape.**
+
+rail0-indexer settles payments that are still open on a **superseded** deployment by reading the transaction receipt and this view — never events, because an indexer declares one event list per contract name and it is the current version's, so an older deployment's fund events match no declared signature and are not indexed. Reading state instead of events is what makes that path version-agnostic, and it is the only reason activating a new contract version does not strand every in-flight payment on the previous one.
+
+So a version that changes this shape breaks settlement for payments it never touches. Before shipping one:
+
+- the indexer's sweeper needs a **per-version read in place first** — before the new version is activated, not after;
+- the deadline is not "the next release". A payment stays bound to the deployment it was opened on for up to the gateway's `AUTHORIZATION_TTL` (7 days by default), so the window is that long from the **last** payment opened on the old deployment;
+- the failure is **silent**. Those payments stop confirming in real time *and* through the fallback; nothing reverts and no alert names the cause.
+
+The same applies to anything else that reads this view — the gateway lists its selector in its ABI registry alongside the write operations for exactly this reason.
 
 ## Development
 
