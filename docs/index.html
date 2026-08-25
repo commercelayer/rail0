@@ -188,7 +188,7 @@
             <div class="k">01 — PAYER</div>
             <h3>Signs, never broadcasts</h3>
             <p>
-              The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the
+              The buyer signs an EIP-3009 <code>ReceiveWithAuthorization</code> over the
               token's domain — like a signed check. Any wallet that signs typed data works:
               no smart-account wallet, no bundler, no approval.
             </p>
@@ -322,7 +322,7 @@
 
         <div class="qs-step">
           <h3>1 — Authorize a payment</h3>
-          <p>The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> off-chain; the merchant submits and pays gas.</p>
+          <p>The buyer signs an EIP-3009 <code>ReceiveWithAuthorization</code> off-chain; the merchant submits and pays gas.</p>
           <div class="code-block">
             <div class="code-head">
               <span>shell</span>
