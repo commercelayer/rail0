@@ -5,7 +5,13 @@ libs = ["lib"]
 test = "test"
 solc = "0.8.31"
 optimizer = true
-optimizer_runs = 200
+# 10_000, not the 200 default: this contract deploys once per chain and is then
+# called for the life of the deployment, so the trade is one-time deploy gas
+# (~+550k) and bytecode size (8.0k -> 10.7k, ample headroom under the 24,576
+# limit) for a measured ~360-640 gas saved on EVERY operation (capture, refund,
+# authorize, ...). Bytecode differs from the v1.x deployments (200 runs) --
+# verification metadata must use this value from v2.0.0 onward.
+optimizer_runs = 10_000
 via_ir = true
 # Pinned rather than inherited from forge's default (today "prague"): the contract
 # depends on Cancun for MCOPY and, since #45, for TSTORE/TLOAD. Naming the oldest
