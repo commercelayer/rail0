@@ -556,19 +556,19 @@ contract RAIL0 {
     }
 
     /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
-    ///         `TransferWithAuthorization` for an `authorize` call.
+    ///         `ReceiveWithAuthorization` for an `authorize` call.
     function authorizeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
         return _authorizeNonce(paymentId, configHash);
     }
 
     /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
-    ///         `TransferWithAuthorization` for a `charge` call.
+    ///         `ReceiveWithAuthorization` for a `charge` call.
     function chargeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
         return _chargeNonce(paymentId, configHash);
     }
 
     /// @notice Computes the EIP-3009 nonce the payee must use when signing a
-    ///         `TransferWithAuthorization` for a `refund` call.
+    ///         `ReceiveWithAuthorization` for a `refund` call.
     /// @param  paymentId    The payment identifier.
     /// @param  configHash   Stored configuration hash (from `getConfigHash`).
     /// @param  capturableAmount Current escrow balance (from `getPaymentState`).
