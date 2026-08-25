@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity =0.8.31;
 
 import { Test } from "forge-std/Test.sol";
 import { Vm } from "forge-std/Vm.sol";
@@ -10,7 +10,9 @@ import { IERC20 } from "../src/interfaces/IERC20.sol";
 //  Mock tokens
 // ================================================================
 
-/// Standard ERC-20 with EIP-3009 `transferWithAuthorization`.
+/// Standard ERC-20 with EIP-3009 `transferWithAuthorization` and
+/// `receiveWithAuthorization`, each verified against its OWN typehash — mirroring
+/// FiatTokenV2 (USDC), where the two are distinct despite the identical field list.
 contract MockERC20 {
     // Lowercase to match the ERC-20 standard's `name()` / `version()` getters.
     // forge-lint: disable-next-line(screaming-snake-case-const)
@@ -24,6 +26,10 @@ contract MockERC20 {
 
     bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH = keccak256(
         "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+    );
+
+    bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH = keccak256(
+        "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
     );
 
     bytes32 public immutable DOMAIN_SEPARATOR;
@@ -113,7 +119,7 @@ contract MockERC20 {
         require(!authorizationState[from][nonce], "EIP3009: nonce used");
 
         bytes32 structHash = keccak256(
-            abi.encode(TRANSFER_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce)
+            abi.encode(RECEIVE_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce)
         );
         bytes32 digest = keccak256(abi.encodePacked(hex"1901", DOMAIN_SEPARATOR, structHash));
         address signer = ecrecover(digest, v, r, s);
@@ -155,7 +161,7 @@ contract MockTransferFails is MockERC20 {
     }
 }
 
-/// Token whose transferWithAuthorization calls back into RAIL0 (reentrancy attempt).
+/// Token whose receiveWithAuthorization calls back into RAIL0 (reentrancy attempt).
 contract MockReentrant {
     bool public reenterAttempted;
     bool public reenterSucceeded;
@@ -168,7 +174,7 @@ contract MockReentrant {
         payload = _payload;
     }
 
-    function transferWithAuthorization(address, address, uint256, uint256, uint256, bytes32, uint8, bytes32, bytes32)
+    function receiveWithAuthorization(address, address, uint256, uint256, uint256, bytes32, uint8, bytes32, bytes32)
         external
     {
         if (rail0 != address(0) && payload.length > 0) {
@@ -240,9 +246,11 @@ contract RAIL0Test is Test {
         });
     }
 
-    /// Sign an EIP-3009 TransferWithAuthorization for the given token, with the
-    /// nonce derived as RAIL0 would expect for either an authorize or charge call.
-    function _sign3009(
+    /// Sign an EIP-3009 ReceiveWithAuthorization for the given token, with the
+    /// nonce derived as RAIL0 would expect. Every RAIL0 operation that spends a
+    /// signature (authorize, charge, refund) goes through `receiveWithAuthorization`,
+    /// so this is the only digest the suite ever signs against a well-behaved token.
+    function _signReceive3009(
         uint256 ownerKey,
         MockERC20 t,
         address from,
@@ -253,7 +261,7 @@ contract RAIL0Test is Test {
         bytes32 nonce
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 structHash = keccak256(
-            abi.encode(t.TRANSFER_WITH_AUTHORIZATION_TYPEHASH(), from, to, value, validAfter, validBefore, nonce)
+            abi.encode(t.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(), from, to, value, validAfter, validBefore, nonce)
         );
         bytes32 digest = keccak256(abi.encodePacked(hex"1901", t.DOMAIN_SEPARATOR(), structHash));
         (v, r, s) = vm.sign(ownerKey, digest);
@@ -264,7 +272,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(paymentId, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
         rail0.authorize(paymentId, p, v, r, s);
     }
@@ -273,7 +281,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(paymentId, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
         rail0.charge(paymentId, p, v, r, s);
     }
@@ -282,12 +290,12 @@ contract RAIL0Test is Test {
     /// Mints only the difference if payee's balance is insufficient.
     function _refund(bytes32 paymentId, RAIL0.Payment memory p, uint256 amount) internal {
         bytes32 configHash = rail0.getConfigHash(paymentId);
-        uint120 refundable = rail0.getPaymentState(paymentId).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(paymentId, configHash, refundable);
+        RAIL0.PaymentState memory st0 = rail0.getPaymentState(paymentId);
+        bytes32 nonce = rail0.refundNonce(paymentId, configHash, st0.capturableAmount, st0.refundableAmount);
         uint256 bal = token.balanceOf(payee);
         if (bal < amount) token.mint(payee, amount - bal);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), amount, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), amount, 0, p.refundExpiry, nonce);
         vm.prank(payee);
         rail0.refund(paymentId, p, amount, v, r, s);
     }
@@ -315,7 +323,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.prank(makeAddr("random-relayer"));
         vm.expectRevert(RAIL0.NotPayee.selector);
@@ -328,9 +336,9 @@ contract RAIL0Test is Test {
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         // Sign with payee key instead of payer
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
-        // Token reverts inside transferWithAuthorization on bad sig — bubbles through RAIL0.
+        // Token reverts inside receiveWithAuthorization on bad sig — bubbles through RAIL0.
         vm.expectRevert();
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
@@ -342,7 +350,7 @@ contract RAIL0Test is Test {
         bytes32 signedHash = rail0.hashPayment(signed);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, signedHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
 
         // Submit with tampered Payment — the contract will derive a different nonce
         RAIL0.Payment memory tampered = _payment();
@@ -362,7 +370,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.AuthorizationExpired.selector);
@@ -395,7 +403,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 chargeNonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, chargeNonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, chargeNonce);
 
         vm.expectRevert();
         vm.prank(payee);
@@ -409,7 +417,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
         vm.prank(payee);
@@ -422,7 +430,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.InvalidAmount.selector);
         vm.prank(payee);
@@ -434,7 +442,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
         emit RAIL0.PaymentAuthorized(PAYMENT_ID, payer, payee, p);
@@ -462,7 +470,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 authNonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, authNonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, authNonce);
 
         vm.expectRevert();
         vm.prank(payee);
@@ -475,7 +483,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.prank(makeAddr("random-relayer"));
         vm.expectRevert(RAIL0.NotPayee.selector);
@@ -487,7 +495,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payeeKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert();
         vm.prank(payee);
@@ -499,7 +507,7 @@ contract RAIL0Test is Test {
         bytes32 signedHash = rail0.hashPayment(signed);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, signedHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), signed.amount, 0, authorizationExpiry, nonce);
 
         RAIL0.Payment memory tampered = _payment();
         tampered.amount = 200e6;
@@ -514,7 +522,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.warp(authorizationExpiry);
         vm.expectRevert(RAIL0.AuthorizationExpired.selector);
@@ -529,7 +537,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
         vm.prank(payee);
@@ -542,7 +550,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), 0, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.InvalidAmount.selector);
         vm.prank(payee);
@@ -554,7 +562,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
         emit RAIL0.PaymentCharged(PAYMENT_ID, payer, payee, p);
@@ -750,10 +758,11 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         vm.prank(makeAddr("relayer"));
         vm.expectRevert(RAIL0.NotPayee.selector);
@@ -777,10 +786,11 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         vm.warp(refundExpiry);
         vm.expectRevert(RAIL0.RefundExpired.selector);
@@ -794,11 +804,12 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         // Sign with payer key instead of payee key → bad sig.
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payerKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         vm.expectRevert();
         vm.prank(payee);
@@ -812,10 +823,11 @@ contract RAIL0Test is Test {
         // First refund succeeds.
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 100e6);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, s);
 
@@ -1022,8 +1034,10 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
-        (uint8 v, bytes32 r, bytes32 s) = _sign3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive3009(payeeKey, token, payee, address(rail0), 0, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 0, v, r, s);
@@ -1035,10 +1049,11 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 101e6);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 101e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 101e6, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.InvalidRefundAmount.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 101e6, v, r, s);
@@ -1048,7 +1063,7 @@ contract RAIL0Test is Test {
         RAIL0.Payment memory p = _payment();
         // No payment created — _loadAndVerify reverts with PaymentNotFound.
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, bytes32(0));
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, bytes32(0));
         vm.expectRevert(RAIL0.PaymentNotFound.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, s);
@@ -1062,9 +1077,10 @@ contract RAIL0Test is Test {
         bad.amount = 9999e6;
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
         vm.expectRevert(RAIL0.PaymentMismatch.selector);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, bad, 50e6, v, r, s);
@@ -1409,7 +1425,7 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, other, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, other, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.TokenNotAccepted.selector);
         vm.prank(payee);
@@ -1423,7 +1439,7 @@ contract RAIL0Test is Test {
     function _signForAuthorize(RAIL0.Payment memory p) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
-        return _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
+        return _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
     }
 
     function test_Validation_RejectsBadExpiriesOrder() public {
@@ -1477,25 +1493,78 @@ contract RAIL0Test is Test {
         // Build the digest manually with the original token, but submit with token=0.
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, rail0.hashPayment(p));
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.ZeroAddress.selector);
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
-    function test_Validation_AcceptsExpiriesEqual() public {
-        // authorizationExpiry == refundExpiry should be allowed
-        // (the contract uses `>` not `>=` in the ordering check).
+    /// Equal expiries are now REJECTED. They used to be accepted — the ordering check
+    /// uses `>`, not `>=` — which collapsed the refund/dispute window to zero: both
+    /// become unreachable the instant the authorization ends, so the payment was
+    /// refundable in name only. (#41)
+    function test_Validation_RejectsExpiriesEqual() public {
         RAIL0.Payment memory p = _payment();
-        uint48 t = uint48(block.timestamp + 1 hours);
+        uint48 t = uint48(block.timestamp + 10 days);
         p.authorizationExpiry = t;
         p.refundExpiry = t;
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
+    }
+
+    /// The boundary, both sides. Exactly MIN_REFUND_WINDOW is accepted; one second
+    /// under is not — so the constant is the real gate, not an approximation of one.
+    function test_Validation_RefundWindowBoundary() public {
+        uint48 authExpiry = uint48(block.timestamp + 10 days);
+
+        RAIL0.Payment memory ok = _payment();
+        ok.authorizationExpiry = authExpiry;
+        ok.refundExpiry = authExpiry + rail0.MIN_REFUND_WINDOW();
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(ok);
+        vm.prank(payee);
+        rail0.authorize(PAYMENT_ID, ok, v, r, s);
         assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, 100e6);
+
+        RAIL0.Payment memory tooTight = _payment();
+        tooTight.authorizationExpiry = authExpiry;
+        tooTight.refundExpiry = authExpiry + rail0.MIN_REFUND_WINDOW() - 1;
+        (v, r, s) = _signForAuthorize(tooTight);
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.authorize(keccak256("too-tight"), tooTight, v, r, s);
+    }
+
+    /// charge shares _validatePayment, so it must reject the same shapes — pinned
+    /// because a validation added to only one entrypoint is the classic miss.
+    function test_Validation_ChargeRejectsACollapsedRefundWindow() public {
+        RAIL0.Payment memory p = _payment();
+        uint48 t = uint48(block.timestamp + 10 days);
+        p.authorizationExpiry = t;
+        p.refundExpiry = t;
+        bytes32 configHash = rail0.hashPayment(p);
+        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
+    }
+
+    /// The metric is DAYS: an hours-long window is refused even though it is non-zero.
+    function test_Validation_RejectsAnHoursLongRefundWindow() public {
+        RAIL0.Payment memory p = _payment();
+        p.authorizationExpiry = uint48(block.timestamp + 10 days);
+        p.refundExpiry = p.authorizationExpiry + 6 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
     // ============================================================
@@ -1565,11 +1634,70 @@ contract RAIL0Test is Test {
         bytes32 configHash = rail0.hashPayment(p);
         bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
 
         vm.expectRevert(RAIL0.PaymentAlreadyExists.selector);
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
+    }
+
+    // ============================================================
+    //  Front-running the merchant's submission (#35)
+    // ============================================================
+    //
+    // authorize/charge spend the buyer's signature via `receiveWithAuthorization`,
+    // whose `msg.sender == to` check is the entire defense: a signature naming RAIL0
+    // as `to` is spendable only through RAIL0. These tests pin both direct-to-token
+    // routes an attacker could try with a signature lifted from the mempool, then
+    // prove the nonce survives for the merchant's real submission.
+
+    function test_FrontRun_AuthorizeSignature_UnusableDirectlyAtToken() public {
+        RAIL0.Payment memory p = _payment();
+        bytes32 configHash = rail0.hashPayment(p);
+        bytes32 nonce = rail0.authorizeNonce(PAYMENT_ID, configHash);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+
+        address attacker = makeAddr("mempool-attacker");
+
+        // Route 1: submit the lifted signature to receiveWithAuthorization directly.
+        // The token requires msg.sender == to, and `to` is RAIL0 — not the attacker.
+        vm.prank(attacker);
+        vm.expectRevert(bytes("EIP3009: caller must be receiver"));
+        token.receiveWithAuthorization(payer, address(rail0), p.amount, 0, authorizationExpiry, nonce, v, r, s);
+
+        // Route 2: submit it to transferWithAuthorization, which anyone may call.
+        // The signature was produced over the RECEIVE typehash, so the recovered
+        // signer differs from the payer and the token rejects it.
+        vm.prank(attacker);
+        vm.expectRevert(bytes("EIP3009: bad sig"));
+        token.transferWithAuthorization(payer, address(rail0), p.amount, 0, authorizationExpiry, nonce, v, r, s);
+
+        // Neither attempt burned the nonce: the merchant's authorize still lands and
+        // the funds end up tracked by a live PaymentState.
+        vm.prank(payee);
+        rail0.authorize(PAYMENT_ID, p, v, r, s);
+        assertEq(rail0.getPaymentState(PAYMENT_ID).capturableAmount, p.amount);
+        assertEq(token.balanceOf(address(rail0)), p.amount);
+    }
+
+    function test_FrontRun_ChargeSignature_UnusableDirectlyAtToken() public {
+        RAIL0.Payment memory p = _payment();
+        bytes32 configHash = rail0.hashPayment(p);
+        bytes32 nonce = rail0.chargeNonce(PAYMENT_ID, configHash);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, authorizationExpiry, nonce);
+
+        address attacker = makeAddr("mempool-attacker");
+
+        vm.prank(attacker);
+        vm.expectRevert(bytes("EIP3009: caller must be receiver"));
+        token.receiveWithAuthorization(payer, address(rail0), p.amount, 0, authorizationExpiry, nonce, v, r, s);
+
+        vm.prank(payee);
+        rail0.charge(PAYMENT_ID, p, v, r, s);
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, p.amount);
+        assertEq(token.balanceOf(payee), p.amount);
     }
 
     // ============================================================
@@ -1624,14 +1752,14 @@ contract RAIL0Test is Test {
         tokens[0] = address(badTransfer);
         RAIL0 r = new RAIL0(tokens);
 
-        // Set up state via authorize (uses transferWithAuthorization, which works).
+        // Set up state via authorize (uses receiveWithAuthorization, which works).
         badTransfer.mint(payer, 1000e6);
         RAIL0.Payment memory p = _payment();
         p.token = address(badTransfer);
         bytes32 cfg = r.hashPayment(p);
         bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
         (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, badTransfer, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, badTransfer, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
         r.authorize(PAYMENT_ID, p, v, rr, ss);
 
@@ -1663,7 +1791,7 @@ contract RAIL0Test is Test {
         bytes32 cfg = r.hashPayment(p);
         bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
         (uint8 v, bytes32 rr, bytes32 ss) =
-            _sign3009(payerKey, frozen, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+            _signReceive3009(payerKey, frozen, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
         vm.prank(payee);
         r.authorize(PAYMENT_ID, p, v, rr, ss);
 
@@ -1750,9 +1878,9 @@ contract RAIL0Test is Test {
         rail0.capture(PAYMENT_ID, p, captureAmount);
 
         RAIL0.PaymentState memory mid = rail0.getPaymentState(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, rail0.hashPayment(p), mid.refundableAmount);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, rail0.hashPayment(p), mid.capturableAmount, mid.refundableAmount);
         (uint8 v, bytes32 r, bytes32 ss) =
-            _sign3009(payeeKey, token, payee, address(rail0), refundAmount, 0, refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), refundAmount, 0, refundExpiry, nonce);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, refundAmount, v, r, ss);
 
@@ -1823,6 +1951,122 @@ contract RAIL0Test is Test {
         rail0.capture(PAYMENT_ID, p, 1);
     }
 
+    // ============================================================
+    //  Refund-nonce uniqueness (#36)
+    // ============================================================
+
+    /// The sequence that used to brick refunds permanently.
+    ///
+    /// Deriving the nonce from `refundableAmount` alone was safe only while that balance
+    /// fell monotonically. `capture` is the one operation that raises it, so it could put
+    /// the balance back to a value already used: the nonce repeated, the token refused it
+    /// as spent, and because `capturableAmount` was by then exhausted the payee had no way
+    /// to move the balance to a fresh value. The residual was permanently non-refundable,
+    /// and an open dispute on it could never be resolved.
+    function test_Refund_SurvivesARevisitedRefundableBalance() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        bytes32 cfg = rail0.getConfigHash(PAYMENT_ID);
+
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 50e6);
+        bytes32 firstNonce = rail0.refundNonce(PAYMENT_ID, cfg, 50e6, 50e6);
+        _refund(PAYMENT_ID, p, 50e6);
+        assertTrue(token.authorizationState(payee, firstNonce), "precondition: first nonce spent");
+
+        // Capture the rest: refundable returns to 50e6 -- the old collision point.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 50e6);
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(st.capturableAmount, 0, "escrow exhausted: the balance cannot be moved again");
+        assertEq(st.refundableAmount, 50e6, "and it is back to a value already used");
+
+        bytes32 secondNonce = rail0.refundNonce(PAYMENT_ID, cfg, 0, 50e6);
+        assertTrue(secondNonce != firstNonce, "the pair differs, so the nonce differs");
+
+        // The refund that was impossible now settles.
+        _refund(PAYMENT_ID, p, 50e6);
+        assertEq(rail0.getPaymentState(PAYMENT_ID).refundableAmount, 0, "fully refunded");
+    }
+
+    /// No nonce may repeat across an ARBITRARY interleaving of captures and refunds.
+    ///
+    /// The property behind it: `amount - capturable - refundable` never falls -- a capture
+    /// moves value between the buckets and leaves it flat, every refund raises it. Since
+    /// the pair determines that quantity, two refunds cannot share a pre-refund pair.
+    ///
+    /// Run against the old single-balance derivation this fails with "REPEATED nonce",
+    /// which is what makes it a regression test rather than a restatement.
+    function testFuzz_RefundNoncesNeverRepeat(uint120 a, uint120 b, uint120 c, uint120 d) public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        bytes32 cfg = rail0.getConfigHash(PAYMENT_ID);
+
+        uint120[4] memory amounts = [
+            uint120(bound(a, 1, 25e6)),
+            uint120(bound(b, 1, 25e6)),
+            uint120(bound(c, 1, 25e6)),
+            uint120(bound(d, 1, 25e6))
+        ];
+
+        bytes32[4] memory seen;
+        uint256 n;
+        uint120 prevSettled;
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            vm.prank(payee);
+            rail0.capture(PAYMENT_ID, p, amounts[i]);
+
+            RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+            assertEq(p.amount - st.capturableAmount - st.refundableAmount, prevSettled, "a capture leaves it flat");
+
+            bytes32 nonce = rail0.refundNonce(PAYMENT_ID, cfg, st.capturableAmount, st.refundableAmount);
+            for (uint256 j = 0; j < n; j++) {
+                assertTrue(nonce != seen[j], "REPEATED nonce across refunds");
+            }
+            seen[n++] = nonce;
+
+            _refund(PAYMENT_ID, p, amounts[i]);
+
+            RAIL0.PaymentState memory settled = rail0.getPaymentState(PAYMENT_ID);
+            uint120 nowSettled = p.amount - settled.capturableAmount - settled.refundableAmount;
+            assertGt(nowSettled, prevSettled, "a refund strictly raises it");
+            prevSettled = nowSettled;
+        }
+    }
+
+    /// A SUCCESSFUL capture must leave an open dispute open. `capturableAmount` and
+    /// `refundableAmount` share a packed slot with `exists` and `disputed`, so any change
+    /// to how that slot is written risks carrying the neighbours with it.
+    ///
+    /// Written while evaluating a whole-struct write for #45 — which was measured and
+    /// REJECTED for costing gas — but kept, because the pin is valuable independently
+    /// and nothing else covered it. test_Capture_IsNotBlockedByAnOpenDispute does not:
+    /// it charges first, so there is nothing capturable and the capture reverts, meaning
+    /// a dropped `disputed` would survive it untouched.
+    function test_Capture_PreservesAnOpenDispute() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // A dispute needs a refundable balance, so capture part of the escrow first.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 40e6);
+
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, bytes32(uint256(1)));
+        assertTrue(rail0.getPaymentState(PAYMENT_ID).disputed, "precondition: dispute open");
+
+        // A second, successful capture — escrow remains, so this one goes through.
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 10e6);
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertTrue(st.disputed, "the whole-slot write must not clear an open dispute");
+        assertTrue(st.exists, "nor the exists flag");
+        assertEq(st.capturableAmount, 50e6, "escrow reduced by both captures");
+        assertEq(st.refundableAmount, 50e6, "and moved to the refundable bucket");
+    }
+
     function test_SafeTransfer_AcceptsNonReturningToken() public {
         // USDT-mainnet style: `transfer` returns NO data. _safeTransfer must accept it
         // (the `data.length == 0` branch — success, no bool to decode), so an outbound
@@ -1849,10 +2093,11 @@ contract RAIL0Test is Test {
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
         uint120 refundable = rail0.getPaymentState(PAYMENT_ID).refundableAmount;
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, refundable);
+        bytes32 nonce =
+            rail0.refundNonce(PAYMENT_ID, configHash, rail0.getPaymentState(PAYMENT_ID).capturableAmount, refundable);
         token.mint(payee, 50e6);
         (uint8 v, bytes32 r, bytes32 s) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         // Mock token.transfer(payer, 50e6) to return false.
         vm.mockCall(
@@ -1867,6 +2112,29 @@ contract RAIL0Test is Test {
     // ============================================================
     //  Reentrancy
     // ============================================================
+
+    /// Transient storage clears at the end of the TRANSACTION, not the call, so the
+    /// guard must release the lock explicitly (#45). Without that, the first guarded
+    /// call in a transaction would poison every later one.
+    ///
+    /// Two captures in a single transaction — the shape a multicall or a smart-account
+    /// batch produces. Both must go through. This is the regression the move from
+    /// storage to transient storage makes possible, and nothing else in the suite would
+    /// notice it: every other test makes one guarded call per transaction.
+    function test_Reentrancy_TwoGuardedCallsInOneTransaction() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+
+        // No vm.prank between them: one broadcast, two guarded entrypoints.
+        vm.startPrank(payee);
+        rail0.capture(PAYMENT_ID, p, 10e6);
+        rail0.capture(PAYMENT_ID, p, 15e6);
+        vm.stopPrank();
+
+        RAIL0.PaymentState memory st = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(st.capturableAmount, 75e6, "both captures must have applied");
+        assertEq(st.refundableAmount, 25e6);
+    }
 
     function test_Reentrancy_GuardBlocksInnerCall() public {
         MockReentrant evil = new MockReentrant();
@@ -2056,9 +2324,9 @@ contract RAIL0Test is Test {
         _charge(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 0, 100e6);
         (uint8 v, bytes32 r, bytes32 sig) =
-            _sign3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
         emit PaymentRefunded(PAYMENT_ID, payer, payee, 50e6, 0, 50e6);
@@ -2073,9 +2341,9 @@ contract RAIL0Test is Test {
         _charge(PAYMENT_ID, p);
 
         bytes32 configHash = rail0.getConfigHash(PAYMENT_ID);
-        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 100e6);
+        bytes32 nonce = rail0.refundNonce(PAYMENT_ID, configHash, 0, 100e6);
         (uint8 v, bytes32 r, bytes32 sig) =
-            _sign3009(payeeKey, token, payee, address(rail0), 100e6, 0, p.refundExpiry, nonce);
+            _signReceive3009(payeeKey, token, payee, address(rail0), 100e6, 0, p.refundExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
         emit PaymentRefunded(PAYMENT_ID, payer, payee, 100e6, 0, 0);

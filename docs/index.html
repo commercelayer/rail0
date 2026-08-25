@@ -50,7 +50,7 @@
           <img class="only-light" src="assets/rail0_black.svg" alt="rail0" />
           <img class="only-dark" src="assets/rail0_white.svg" alt="rail0" />
         </a>
-        <a class="v" href="https://github.com/commercelayer/rail0/releases/tag/v1.3.0" aria-label="rail0 v1.3.0 release notes">v1.3.0</a>
+        <a class="v" href="https://github.com/commercelayer/rail0/releases/tag/v1.4.0" aria-label="rail0 v1.4.0 release notes">v1.4.0</a>
       </div>
       <nav class="nav-links">
         <a class="hide-sm" href="manifesto.html">Manifesto</a>
@@ -188,7 +188,7 @@
             <div class="k">01 — PAYER</div>
             <h3>Signs, never broadcasts</h3>
             <p>
-              The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> over the
+              The buyer signs an EIP-3009 <code>ReceiveWithAuthorization</code> over the
               token's domain — like a signed check. Any wallet that signs typed data works:
               no smart-account wallet, no bundler, no approval.
             </p>
@@ -222,9 +222,9 @@
         <h2>Works on multiple chains.</h2>
         <p>
           <i>rail0</i> is not tied to any one chain. It runs on any network that meets two hard
-          requirements: an EVM that compiles Solidity 0.8.27, and tokens that expose the
-          EIP-3009 <code>transferWithAuthorization</code> / <code>receiveWithAuthorization</code>
-          entrypoints — the off-chain signatures the whole protocol is built on. That's the
+          requirements: an EVM that compiles Solidity 0.8.31 and supports the Cancun fork, and
+          tokens that expose the EIP-3009 <code>receiveWithAuthorization</code>
+          entrypoint — the off-chain signature the whole protocol is built on. That's the
           entire bar. Anyone can deploy it, permissionlessly, wherever those conditions hold.
         </p>
         <div class="table-scroll">
@@ -322,7 +322,7 @@
 
         <div class="qs-step">
           <h3>1 — Authorize a payment</h3>
-          <p>The buyer signs an EIP-3009 <code>TransferWithAuthorization</code> off-chain; the merchant submits and pays gas.</p>
+          <p>The buyer signs an EIP-3009 <code>ReceiveWithAuthorization</code> off-chain; the merchant submits and pays gas.</p>
           <div class="code-block">
             <div class="code-head">
               <span>shell</span>
@@ -367,8 +367,9 @@ R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
               <span>shell</span>
               <span>refund</span>
             </div>
-            <pre><span class="c"># 1. Refund nonce for the CURRENT refundable balance (here: 50 USDC)</span>
-NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"refundNonce(bytes32,bytes32,uint120)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH 50000000 --rpc-url $RPC)
+            <pre><span class="c"># 1. Refund nonce for the CURRENT balances (escrow left, refundable left) — both</span>
+<span class="c">#    go into the nonce; read them from getPaymentState. Here: 0 and 50 USDC.</span>
+NONCE=$(<span class="k">cast call</span> $RAIL0 <span class="s">"refundNonce(bytes32,bytes32,uint120,uint120)(bytes32)"</span> $PAYMENT_ID $CONFIG_HASH 0 50000000 --rpc-url $RPC)
 
 <span class="c"># 2. Merchant signs the EIP-3009 digest (validBefore = p.refundExpiry)</span>
 SIG=$(<span class="k">cast wallet sign</span> --no-hash --private-key $PAYEE_KEY $DIGEST)
