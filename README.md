@@ -43,6 +43,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 |-----------|----------|---------------|----------|-----------|---------|-----------------|
 | Arbitrum  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Arc       | Testnet  | USDC, EURC    | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Avalanche | Fuji     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.snowtrace.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Base      | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Celo      | Sepolia  | USDC, USD₮    | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
