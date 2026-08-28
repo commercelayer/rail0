@@ -50,6 +50,8 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Polygon   | Amoy     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://amoy.polygonscan.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Sei       | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.seistream.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Sonic     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.sonicscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Unichain  | Sepolia  | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.uniscan.xyz/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet  | USDT0         | Planned  | **no**    | —       | — |
 
 ### Mainnets
@@ -80,9 +82,16 @@ checked by querying that chain's own HyperSync endpoint, not read off a list.
 
 That is exactly the case of **Celo Sepolia**, and the reason is worth recording because it is not the
 obvious one: its tokens *do* implement EIP-3009 (verified on-chain against the deployment's own
-allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap. Both chains'
-*mainnets* are covered, so the gap is testnet-only: easy to assume away in either direction. Either
-is liftable without touching the contract, by indexing that chain another way.
+allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap, and so does
+**Unichain Sepolia**, which is why it is listed Live above with HyperSync `no`: the contract is
+deployed and verified there and the reference indexer cannot watch it.
+
+The pattern is worth naming, because it caught us twice: HyperSync serves several of these chains'
+MAINNETS and not their testnets. Measured 2026-08-28 — `https://<chainId>.hypersync.xyz/height`
+answers 200 for Unichain (130) and World Chain (480) and fails to connect for Unichain Sepolia
+(1301) and World Chain Sepolia (4801), in the same request loop. So the gap is testnet-only: easy to
+assume away in either direction. Any of them is liftable without touching the contract, by indexing
+that chain another way.
 
 ## Protocol
 
