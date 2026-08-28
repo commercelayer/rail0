@@ -52,19 +52,26 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Sei       | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.seistream.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Sonic     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.sonicscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Unichain  | Sepolia  | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.uniscan.xyz/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| World Chain | Sepolia | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.worldscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet  | USDT0         | Planned  | **no**    | —       | — |
 
 ### Mainnets
 
-| Chain     | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
-|-----------|----------|---------------|-------------------|-----------|---------|-----------------|
-| Arbitrum  | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Avalanche | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Base      | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Ethereum  | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Optimism  | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Polygon   | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Tempo     | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
+| Chain       | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
+|-------------|----------|---------------|-------------------|-----------|---------|-----------------|
+| Arbitrum    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Avalanche   | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Base        | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Celo        | Mainnet  | USDC, USD₮    | Planned           | yes       | —       | — |
+| Ethereum    | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Monad       | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Optimism    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Polygon     | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Sei         | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Sonic       | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Unichain    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| World Chain | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Tempo       | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
 
 Tempo is the one entry whose status is not about scheduling: TIP-20 does not
 implement EIP-3009, so _rail0_ cannot run there at all until that changes.
@@ -82,9 +89,10 @@ checked by querying that chain's own HyperSync endpoint, not read off a list.
 
 That is exactly the case of **Celo Sepolia**, and the reason is worth recording because it is not the
 obvious one: its tokens *do* implement EIP-3009 (verified on-chain against the deployment's own
-allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap, and so does
-**Unichain Sepolia**, which is why it is listed Live above with HyperSync `no`: the contract is
-deployed and verified there and the reference indexer cannot watch it.
+allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap, and so do
+**Unichain Sepolia** and **World Chain Sepolia** — which is why both are listed Live above with
+HyperSync `no`: the contract is deployed and verified on each, and the reference indexer cannot
+watch either.
 
 The pattern is worth naming, because it caught us twice: HyperSync serves several of these chains'
 MAINNETS and not their testnets. Measured 2026-08-28 — `https://<chainId>.hypersync.xyz/height`
@@ -92,6 +100,18 @@ answers 200 for Unichain (130) and World Chain (480) and fails to connect for Un
 (1301) and World Chain Sepolia (4801), in the same request loop. So the gap is testnet-only: easy to
 assume away in either direction. Any of them is liftable without touching the contract, by indexing
 that chain another way.
+
+**Every mainnet above is HyperSync-covered**, Celo, Unichain and World Chain included — checked the
+same way, one request per chain id. Which is why the mainnet column reads `yes` throughout and the
+`no`s are all testnets. Their tokens were checked too: USDC on each carries the three canonical
+EIP-3009 typehashes with a matching EIP-712 domain, EURC where the table names it, and Celo's USD₮
+carries them as well (with no `version()` getter, so a client has to be told its domain version
+rather than reading it).
+
+Being indexable is not being ready, though, and for two of them finality is the reason: Unichain
+mainnet reaches `safe` in 5m08s and World Chain in 2m40s, against roughly 2 minutes on Base and
+Optimism and effectively zero on Arc, Sei, Sonic, Monad and Avalanche. `Planned` here means the
+contract can run there, not that a checkout on it would feel like one.
 
 ## Protocol
 
