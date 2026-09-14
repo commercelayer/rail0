@@ -46,23 +46,35 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 |-----------|----------|---------------|----------|-----------|---------|-----------------|
 | Arbitrum  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Arc       | Testnet  | USDC, EURC    | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Avalanche | Fuji     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.snowtrace.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Base      | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Celo      | Sepolia  | USDC, USD₮    | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Monad     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.monadexplorer.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Polygon   | Amoy     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://amoy.polygonscan.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Sei       | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.seistream.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Sonic     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.sonicscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Unichain  | Sepolia  | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.uniscan.xyz/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| World Chain | Sepolia | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.worldscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet  | USDT0         | Planned  | **no**    | —       | — |
 
 ### Mainnets
 
-| Chain     | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
-|-----------|----------|---------------|-------------------|-----------|---------|-----------------|
-| Arbitrum  | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Avalanche | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Base      | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Ethereum  | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
-| Optimism  | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Polygon   | Mainnet  | USDC          | Planned           | yes       | —       | — |
-| Tempo     | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
+| Chain       | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
+|-------------|----------|---------------|-------------------|-----------|---------|-----------------|
+| Arbitrum    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Avalanche   | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Base        | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Celo        | Mainnet  | USDC, USD₮    | Planned           | yes       | —       | — |
+| Ethereum    | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Monad       | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Optimism    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Polygon     | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Sei         | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Sonic       | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| Unichain    | Mainnet  | USDC          | Planned           | yes       | —       | — |
+| World Chain | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Tempo       | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
 
 Tempo is the one entry whose status is not about scheduling: TIP-20 does not
 implement EIP-3009, so _rail0_ cannot run there at all until that changes.
@@ -80,9 +92,29 @@ checked by querying that chain's own HyperSync endpoint, not read off a list.
 
 That is exactly the case of **Celo Sepolia**, and the reason is worth recording because it is not the
 obvious one: its tokens *do* implement EIP-3009 (verified on-chain against the deployment's own
-allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap. Both chains'
-*mainnets* are covered, so the gap is testnet-only: easy to assume away in either direction. Either
-is liftable without touching the contract, by indexing that chain another way.
+allowlist) — the blocker is purely indexing. **Plasma's testnet** has the same gap, and so do
+**Unichain Sepolia** and **World Chain Sepolia** — which is why both are listed Live above with
+HyperSync `no`: the contract is deployed and verified on each, and the reference indexer cannot
+watch either.
+
+The pattern is worth naming, because it caught us twice: HyperSync serves several of these chains'
+MAINNETS and not their testnets. Measured 2026-08-28 — `https://<chainId>.hypersync.xyz/height`
+answers 200 for Unichain (130) and World Chain (480) and fails to connect for Unichain Sepolia
+(1301) and World Chain Sepolia (4801), in the same request loop. So the gap is testnet-only: easy to
+assume away in either direction. Any of them is liftable without touching the contract, by indexing
+that chain another way.
+
+**Every mainnet above is HyperSync-covered**, Celo, Unichain and World Chain included — checked the
+same way, one request per chain id. Which is why the mainnet column reads `yes` throughout and the
+`no`s are all testnets. Their tokens were checked too: USDC on each carries the three canonical
+EIP-3009 typehashes with a matching EIP-712 domain, EURC where the table names it, and Celo's USD₮
+carries them as well (with no `version()` getter, so a client has to be told its domain version
+rather than reading it).
+
+Being indexable is not being ready, though, and for two of them finality is the reason: Unichain
+mainnet reaches `safe` in 5m08s and World Chain in 2m40s, against roughly 2 minutes on Base and
+Optimism and effectively zero on Arc, Sei, Sonic, Monad and Avalanche. `Planned` here means the
+contract can run there, not that a checkout on it would feel like one.
 
 ## Protocol
 
@@ -175,6 +207,8 @@ Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no f
 `closeDispute` withdraws an open dispute. **Only the payer** may call — the merchant cannot dismiss a buyer's dispute; its only way to close one is a **full `refund`** (bringing `refundableAmount` to 0), which auto-closes the dispute and emits `DisputeClosed(..., closedBy = payee, REASON_FULL_REFUND)`. A manual withdrawal has no window restriction and emits `DisputeClosed(..., closedBy = payer, reason)`. Reopening within the refund window is allowed; each open and close emits its event.
 
 A dispute opened but never resolved before `refundExpiry` stays `disputed == true` permanently — like every time bound in _rail0_, `refundExpiry` is a guard, not a state transition. Off-chain systems read `disputed && now ≥ refundExpiry` to interpret it as "contested, never resolved on-chain within the window."
+
+**Past `refundExpiry` the two parties no longer hold the same options.** `closeDispute` has no window, so the payer can always withdraw. The merchant's only close path is the full-refund auto-close, which lives inside `refund` and dies with it at `refundExpiry`. So a dispute opened in the last moments of the window — even one the merchant would gladly refund — can from then on be cleared **only by the buyer**. This is an accepted property, not an oversight; see the Security model note below.
 
 ### The `Payment` struct
 
@@ -305,6 +339,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound and is the `validBefore` pinned into the merchant's refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature). Best practice is bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not far-future `refundExpiry`.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Disputes are signal, not arbitration.** The protocol has no arbitration layer: the only on-chain mechanisms that move funds back to the buyer are `release` (uncaptured escrow, after `authorizationExpiry`) and the merchant's discretionary `refund`. The `dispute` lifecycle adds a censorship-resistant record with **no fund effect**. Because a dispute carries no financial payoff, friendly-fraud abuse is structurally neutralized on-chain; detection and reaction belong off-chain.
+- **A dispute opened at the edge of the window is buyer-closable only — accepted.** `dispute` is allowed right up to `refundExpiry`, and the merchant's only way to clear the flag is the full-refund auto-close inside `refund`, which is itself gated on `refundExpiry` (`test_Refund_RevertsAtRefundExpiry`). Open a dispute in the final block of the window and from the next one the merchant has **no on-chain action that closes it**: `closeDispute` is payer-only, deliberately and without a window, because withdrawing is always benign (`test_CloseDispute_AllowedAfterRefundExpiry`). No funds are affected — the flag never had a fund effect — but every off-chain reader shows a permanently contested payment and only the buyer can change that. Accepted rather than fixed because both alternatives are worse: requiring a minimum gap before `refundExpiry` would withdraw the buyer's protection exactly late in the window, which is when a buyer is most likely to notice a problem, and letting a refund close a dispute after `refundExpiry` would mean a fund-moving path outliving its own deadline. The mitigation is the same one that serves the refund window generally — react to `PaymentDisputed` well before the deadline rather than at it.
 - **Test coverage.** A comprehensive Foundry suite (`contracts/test/RAIL0.t.sol`) covers the full lifecycle, allowlist construction, every revert path (incl. `AlreadyCaptured` on `void` after a capture), submitter-authorization gates, the dispute open/close lifecycle, EIP-712 hashing determinism, EIP-3009 nonce derivation and signature verification, `_safeTransfer` failure handling, boundary conditions, and reentrancy attempts via a malicious mock token. **No external audit has been completed yet — formal audits are underway and reports will be published once available.**
 
 ### Limits
@@ -452,6 +487,20 @@ cast call $RAIL0 "DOMAIN_SEPARATOR()(bytes32)" --rpc-url $RPC
 cast call $RAIL0 "isAcceptedToken(address)(bool)" $TOKEN --rpc-url $RPC
 cast call $RAIL0 "acceptedTokens()(address[])" --rpc-url $RPC
 ```
+
+#### `getPaymentState` is a cross-version compatibility surface
+
+It is not only a convenience view. **`getPaymentState(bytes32)` returns `(bool, uint120, uint120)`, and other repos depend on that shape.**
+
+rail0-indexer settles payments that are still open on a **superseded** deployment by reading the transaction receipt and this view — never events, because an indexer declares one event list per contract name and it is the current version's, so an older deployment's fund events match no declared signature and are not indexed. Reading state instead of events is what makes that path version-agnostic, and it is the only reason activating a new contract version does not strand every in-flight payment on the previous one.
+
+So a version that changes this shape breaks settlement for payments it never touches. Before shipping one:
+
+- the indexer's sweeper needs a **per-version read in place first** — before the new version is activated, not after;
+- the deadline is not "the next release". A payment stays bound to the deployment it was opened on for up to the gateway's `AUTHORIZATION_TTL` (7 days by default), so the window is that long from the **last** payment opened on the old deployment;
+- the failure is **silent**. Those payments stop confirming in real time *and* through the fallback; nothing reverts and no alert names the cause.
+
+The same applies to anything else that reads this view — the gateway lists its selector in its ABI registry alongside the write operations for exactly this reason.
 
 ## Development
 
