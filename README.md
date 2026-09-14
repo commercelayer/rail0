@@ -540,6 +540,34 @@ forge script script/Deploy.s.sol \
 
 See `contracts/.env.example` for the full set of environment variables.
 
+The script uses plain `CREATE`, so the deployed address derives from `(deployer, nonce)` and not
+from the code. Two chains share an address only when the deployer's nonce happens to match on
+both — which is why every 1.3.0 deployment landed on one address (nonce 0 everywhere) and why no
+later release can be expected to. A shared address is therefore not evidence of identical code;
+verify each deployment on its own.
+
+#### Verification
+
+The deployed bytecode is reproducible only from the exact build settings in
+`contracts/foundry.toml`, each pinned there rather than inherited from forge's defaults:
+
+| setting | value |
+| --- | --- |
+| `solc` | `0.8.31` |
+| `evm_version` | `cancun` |
+| `optimizer` / `optimizer_runs` | `true` / `10_000` |
+| `via_ir` | `true` |
+
+`optimizer_runs` moved from `200` to `10_000` in 1.4.0, so a **1.3.x** deployment verifies at
+`200` and a **1.4.0** one at `10_000`. The same source at the wrong runs count compiles to
+different bytecode and the verifier rejects it with no hint as to why.
+
+```sh
+forge verify-contract <address> src/RAIL0.sol:RAIL0 \
+  --constructor-args $(cast abi-encode "constructor(address[])" "[$RAIL0_ACCEPTED_TOKENS]") \
+  --rpc-url $RPC --verifier <sourcify|etherscan> --verifier-url <...>
+```
+
 ### Layout
 
 ```
