@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity =0.8.31;
 
 import { Script, console2 } from "forge-std/Script.sol";
 import { RAIL0 } from "../src/RAIL0.sol";

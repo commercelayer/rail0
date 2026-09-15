@@ -38,7 +38,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      # solc is pinned in foundry.toml (0.8.27), so this compiles with the same
+      # solc is pinned in foundry.toml (0.8.31), so this compiles with the same
       # compiler the deployments used rather than whatever ships with the toolchain.
       - name: Format
         run: forge fmt --check

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity =0.8.31;
 
 import { IEIP3009 } from "./interfaces/IEIP3009.sol";
 import { IERC20 } from "./interfaces/IERC20.sol";
@@ -7,7 +7,7 @@ import { IERC20 } from "./interfaces/IERC20.sol";
 /// @title RAIL0 — Peer-to-peer stablecoin payments for commerce
 /// @notice Authorize, capture, void, release, and refund stablecoin payments on any
 ///         EVM-compatible chain whose accepted tokens implement EIP-3009
-///         (`transferWithAuthorization`). Buyer-funded operations use a single
+///         (`receiveWithAuthorization`). Buyer-funded operations use a single
 ///         EIP-3009 signature: the buyer signs off-chain and the merchant submits the
 ///         transaction and pays gas natively, so no token allowance state is touched.
 ///         Every operation is merchant-submitted, except `release`, which the payer or
@@ -19,12 +19,26 @@ contract RAIL0 {
     //  Constants
     // ================================================================
 
-    string public constant VERSION = "1.3.0";
+    string public constant VERSION = "1.4.0";
 
     /// @dev Reason emitted on the `DisputeClosed` event when a dispute is closed
     ///      automatically by a full refund (one that brings `refundableAmount` to 0).
     ///      Lets indexers distinguish a refund-driven close from a buyer withdrawal.
     bytes32 public constant REASON_FULL_REFUND = keccak256("rail0.dispute.full_refund");
+
+    /// Minimum gap the contract requires between `authorizationExpiry` and
+    /// `refundExpiry`, so every payment carries a refund/dispute window that is
+    /// actually usable.
+    ///
+    /// Days, not hours: the window has to survive a buyer noticing a problem, a
+    /// merchant responding and a transaction confirming — a window measured in hours
+    /// is one the buyer can lose to a weekend. One day is a FLOOR against a collapsed
+    /// window, not a recommendation; the README's guidance remains 14–30 days aligned
+    /// with consumer-protection practice.
+    ///
+    /// Chosen so it cannot reject what integrators already produce: the gateway's
+    /// defaults are a 7-day authorization and a 30-day refund window, a 23-day gap.
+    uint48 public constant MIN_REFUND_WINDOW = 1 days;
 
     /// @dev EIP-712 typehash for the EIP712Domain struct.
     bytes32 internal constant _DOMAIN_TYPEHASH =
@@ -48,8 +62,6 @@ contract RAIL0 {
     bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
 
     /// @dev Reentrancy lock states.
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
 
     // ================================================================
     //  Domain separator (EIP-712)
@@ -76,7 +88,17 @@ contract RAIL0 {
     //  Reentrancy lock
     // ================================================================
 
-    uint256 private _reentrancyStatus = _NOT_ENTERED;
+    /// Reentrancy lock in EIP-1153 transient storage.
+    ///
+    /// A `transient` state variable (Solidity 0.8.28+) rather than inline assembly around
+    /// tload/tstore. Not merely tidier: it measured CHEAPER than the assembly version by
+    /// 89–356 gas per entrypoint, because the compiler tracks the slot itself instead of
+    /// working around an opaque asm block.
+    ///
+    /// `uint256` rather than `bool` on purpose — also measured. A `bool transient` costs
+    /// 140–557 gas MORE, since every read and write carries the bool's 0/1 normalisation.
+    /// Nothing here needs the type to be a bool; 0 and 1 say the same thing for free.
+    uint256 private transient _entered;
 
     modifier nonReentrant() {
         _nonReentrantBefore();
@@ -85,12 +107,17 @@ contract RAIL0 {
     }
 
     function _nonReentrantBefore() private {
-        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
-        _reentrancyStatus = _ENTERED;
+        if (_entered != 0) revert Reentrancy();
+        _entered = 1;
     }
 
+    /// Releases the lock EXPLICITLY, which transient storage does not make optional.
+    /// A transient slot is cleared when the TRANSACTION ends, not when the call does, so
+    /// without this a second guarded call in the same transaction — two operations
+    /// batched by a multicall or a smart account — would find the lock still held and
+    /// revert Reentrancy. Pinned by test_Reentrancy_TwoGuardedCallsInOneTransaction. (#45)
     function _nonReentrantAfter() private {
-        _reentrancyStatus = _NOT_ENTERED;
+        _entered = 0;
     }
 
     // ================================================================
@@ -99,7 +126,7 @@ contract RAIL0 {
 
     /// @param acceptedTokens Token addresses this deployment will accept on `Payment.token`.
     ///                       Each entry must be non-zero and unique. The list is fixed forever.
-    ///                       Tokens MUST implement EIP-3009 (`transferWithAuthorization`).
+    ///                       Tokens MUST implement EIP-3009 (`receiveWithAuthorization`).
     constructor(address[] memory acceptedTokens) {
         _CACHED_CHAIN_ID = block.chainid;
         _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
@@ -248,7 +275,7 @@ contract RAIL0 {
     // ================================================================
 
     /// @notice Authorize funds: pull `p.amount` from buyer into escrow.
-    /// @dev    The buyer signs an EIP-3009 `TransferWithAuthorization` over the token's
+    /// @dev    The buyer signs an EIP-3009 `ReceiveWithAuthorization` over the token's
     ///         domain with `from = p.payer`, `to = address(this)`, `value = p.amount`,
     ///         `validAfter = 0`, `validBefore = p.authorizationExpiry`, and
     ///         `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`.
@@ -257,6 +284,13 @@ contract RAIL0 {
     ///         be opened. The nonce derivation binds the signature to specific Payment
     ///         terms — a merchant cannot substitute different terms and reuse the signature.
     ///         Only `p.payee` (the merchant) may submit; the submitter pays gas.
+    ///
+    ///         The RECEIVE variant, not the transfer one, on purpose: the token enforces
+    ///         `msg.sender == to` on `receiveWithAuthorization`, so the signature is only
+    ///         spendable through this contract. A `TransferWithAuthorization` signature
+    ///         could be lifted from the mempool and submitted straight to the token by
+    ///         anyone — funds would land here with no `PaymentState` ever created, and no
+    ///         payout path can reach them (#35).
     function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
@@ -271,7 +305,7 @@ contract RAIL0 {
         // any Payment field changes the configHash, which changes the nonce, which
         // makes the recovered signer differ from `p.payer`, causing the token to revert.
         IEIP3009(p.token)
-            .transferWithAuthorization(
+            .receiveWithAuthorization(
                 p.payer,
                 address(this),
                 p.amount,
@@ -287,10 +321,10 @@ contract RAIL0 {
     }
 
     /// @notice One-shot: authorize and immediately capture (no hold).
-    /// @dev    Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and
-    ///         `validBefore = p.authorizationExpiry` baked into the buyer's signed
-    ///         payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an authorize-
-    ///         signature can't be repurposed for charge (and vice versa). Here
+    /// @dev    Same EIP-3009 `ReceiveWithAuthorization` pattern as `authorize` (including
+    ///         `validAfter = 0` and `validBefore = p.authorizationExpiry` baked into the
+    ///         buyer's signed payload), but the nonce uses `_CHARGE_NONCE_PREFIX` so an
+    ///         authorize-signature can't be repurposed for charge (and vice versa). Here
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
     ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
@@ -305,7 +339,7 @@ contract RAIL0 {
             PaymentState({ exists: true, capturableAmount: 0, refundableAmount: p.amount, disputed: false });
 
         IEIP3009(p.token)
-            .transferWithAuthorization(
+            .receiveWithAuthorization(
                 p.payer, address(this), p.amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
             );
 
@@ -321,7 +355,7 @@ contract RAIL0 {
     ///         recover their escrowed funds; the merchant may also submit to settle.
     function release(bytes32 paymentId, Payment calldata p) external nonReentrant {
         if (msg.sender != p.payer && msg.sender != p.payee) revert NotPayerOrPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp < p.authorizationExpiry) revert AuthorizationNotExpired();
         if (s.capturableAmount == 0) revert NothingToRelease();
 
@@ -349,7 +383,7 @@ contract RAIL0 {
     /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
     function dispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
         if (msg.sender != p.payer) revert NotPayer();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
         if (s.refundableAmount == 0) revert NothingToDispute();
         if (s.disputed) revert AlreadyDisputed();
@@ -367,7 +401,7 @@ contract RAIL0 {
     /// @param reason Caller-supplied code recorded in the event; meaning lives off-chain.
     function closeDispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external {
         if (msg.sender != p.payer) revert NotPayer();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (!s.disputed) revert NotDisputed();
 
         _state[paymentId].disputed = false;
@@ -382,7 +416,7 @@ contract RAIL0 {
     /// @notice Capture authorized funds: pay the merchant.
     function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (amount == 0 || amount > s.capturableAmount) revert InvalidCaptureAmount();
 
@@ -411,7 +445,7 @@ contract RAIL0 {
     ///         never restoring `capturableAmount`.
     function void(bytes32 paymentId, Payment calldata p) external nonReentrant {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory s = _loadAndVerify(paymentId, p);
+        (PaymentState memory s,) = _loadAndVerify(paymentId, p);
         if (s.capturableAmount == 0) revert NothingToVoid();
         if (s.capturableAmount != p.amount) revert AlreadyCaptured();
 
@@ -427,7 +461,7 @@ contract RAIL0 {
 
     /// @notice Refund a previously captured amount from the merchant's wallet.
     /// @dev    Uses EIP-3009 `receiveWithAuthorization` — the payee signs a
-    ///         `TransferWithAuthorization` digest off-chain; RAIL0 calls
+    ///         `ReceiveWithAuthorization` digest off-chain; RAIL0 calls
     ///         `receiveWithAuthorization` to pull funds from the payee directly into
     ///         this contract, then immediately forwards them to the payer. No ERC-20
     ///         allowance (`approve`) is needed.
@@ -438,7 +472,7 @@ contract RAIL0 {
     ///           value       = amount
     ///           validAfter  = 0
     ///           validBefore = p.refundExpiry
-    ///           nonce       = refundNonce(paymentId, configHash, refundableAmount)
+    ///           nonce       = refundNonce(paymentId, configHash, capturableAmount, refundableAmount)
     ///
     ///         The nonce encodes the current `refundableAmount` so each partial refund
     ///         has a unique, deterministic nonce — preventing replay and double-spending
@@ -449,7 +483,7 @@ contract RAIL0 {
         nonReentrant
     {
         if (msg.sender != p.payee) revert NotPayee();
-        PaymentState memory st = _loadAndVerify(paymentId, p);
+        (PaymentState memory st, bytes32 configHash) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
         if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
 
@@ -477,7 +511,7 @@ contract RAIL0 {
                 amount,
                 0, // validAfter: available immediately
                 p.refundExpiry, // validBefore: same as on-chain refund deadline
-                _refundNonce(paymentId, _configHash[paymentId], st.refundableAmount),
+                _refundNonce(paymentId, configHash, st.capturableAmount, st.refundableAmount),
                 v,
                 r,
                 s
@@ -522,30 +556,41 @@ contract RAIL0 {
     }
 
     /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
-    ///         `TransferWithAuthorization` for an `authorize` call.
+    ///         `ReceiveWithAuthorization` for an `authorize` call.
     function authorizeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
         return _authorizeNonce(paymentId, configHash);
     }
 
     /// @notice Computes the EIP-3009 nonce the buyer must use when signing a
-    ///         `TransferWithAuthorization` for a `charge` call.
+    ///         `ReceiveWithAuthorization` for a `charge` call.
     function chargeNonce(bytes32 paymentId, bytes32 configHash) external pure returns (bytes32) {
         return _chargeNonce(paymentId, configHash);
     }
 
     /// @notice Computes the EIP-3009 nonce the payee must use when signing a
-    ///         `TransferWithAuthorization` for a `refund` call.
+    ///         `ReceiveWithAuthorization` for a `refund` call.
     /// @param  paymentId    The payment identifier.
     /// @param  configHash   Stored configuration hash (from `getConfigHash`).
+    /// @param  capturableAmount Current escrow balance (from `getPaymentState`).
     /// @param  refundableAmount Current refundable balance (from `getPaymentState`).
-    ///         Including this value makes each partial-refund nonce unique and ties
-    ///         the signature to a specific payment state, preventing replay.
-    function refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+    ///
+    /// @dev    BOTH balances go into the nonce, and that is what makes it unique.
+    ///
+    ///         The pair determines `amount - capturable - refundable` — how much of the
+    ///         payment has left the two live buckets. That quantity never falls: a
+    ///         capture moves value BETWEEN the buckets and leaves it flat, while every
+    ///         refund raises it by the refunded amount. So no two refunds of a payment
+    ///         can share a pre-refund pair, and no nonce repeats.
+    ///
+    ///         Deriving from `refundableAmount` alone was unsafe: a capture puts that
+    ///         balance back to a value already used, so the nonce repeats and the token
+    ///         refuses every later refund — permanently. See #36.
+    function refundNonce(bytes32 paymentId, bytes32 configHash, uint120 capturableAmount, uint120 refundableAmount)
         external
         pure
         returns (bytes32)
     {
-        return _refundNonce(paymentId, configHash, refundableAmount);
+        return _refundNonce(paymentId, configHash, capturableAmount, refundableAmount);
     }
 
     /// @notice Returns the EIP-712 domain separator for this contract on the current chain.
@@ -565,18 +610,27 @@ contract RAIL0 {
         return keccak256(abi.encode(_CHARGE_NONCE_PREFIX, paymentId, configHash));
     }
 
-    function _refundNonce(bytes32 paymentId, bytes32 configHash, uint120 refundableAmount)
+    function _refundNonce(bytes32 paymentId, bytes32 configHash, uint120 capturableAmount, uint120 refundableAmount)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(_REFUND_NONCE_PREFIX, paymentId, configHash, refundableAmount));
+        return keccak256(abi.encode(_REFUND_NONCE_PREFIX, paymentId, configHash, capturableAmount, refundableAmount));
     }
 
     function _validatePayment(Payment calldata p) internal view {
         if (p.amount == 0) revert InvalidAmount();
         if (p.authorizationExpiry == 0) revert InvalidExpiries();
         if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
+        // A refund/dispute window of at least MIN_REFUND_WINDOW. The ordering check
+        // above is what makes this subtraction safe — refundExpiry >= authorizationExpiry
+        // is already guaranteed, so it cannot underflow.
+        //
+        // Without it, equal expiries were accepted (the ordering check uses `>`, not
+        // `>=`), which collapses the window to zero: refund and dispute both become
+        // unreachable the instant the authorization ends, so a payment could be created
+        // that is refundable in name only.
+        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
@@ -589,10 +643,18 @@ contract RAIL0 {
         if (!_accepted[p.token]) revert TokenNotAccepted();
     }
 
-    function _loadAndVerify(bytes32 paymentId, Payment calldata p) internal view returns (PaymentState memory s) {
+    /// Returns the verified config hash alongside the state. The hash is loaded here
+    /// anyway to compare against `_hash(p)`, so handing it back saves `refund` a second
+    /// SLOAD of the same slot — it needs the hash to derive the EIP-3009 nonce. (#45)
+    function _loadAndVerify(bytes32 paymentId, Payment calldata p)
+        internal
+        view
+        returns (PaymentState memory s, bytes32 configHash)
+    {
         s = _state[paymentId];
         if (!s.exists) revert PaymentNotFound();
-        if (_configHash[paymentId] != _hash(p)) revert PaymentMismatch();
+        configHash = _configHash[paymentId];
+        if (configHash != _hash(p)) revert PaymentMismatch();
     }
 
     function _hash(Payment calldata p) internal view returns (bytes32) {
