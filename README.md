@@ -44,16 +44,16 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 
 | Chain     | Network  | Stablecoin(s) | Status   | HyperSync | Version | _rail0_ address |
 |-----------|----------|---------------|----------|-----------|---------|-----------------|
-| Arbitrum  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://arbitrum-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Arc       | Testnet  | USDC, EURC    | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.arcscan.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Avalanche | Fuji     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.snowtrace.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Base      | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://base-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Arbitrum  | Sepolia  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://arbitrum-sepolia.blockscout.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Arc       | Testnet  | USDC, EURC    | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.arcscan.app/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Avalanche | Fuji     | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.snowtrace.io/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Base      | Sepolia  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://base-sepolia.blockscout.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Celo      | Sepolia  | USDC, USD₮    | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Monad     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.monadexplorer.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet-explorer.optimism.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Polygon   | Amoy     | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://amoy.polygonscan.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Sei       | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.seistream.app/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
-| Sonic     | Testnet  | USDC          | **Live** | yes       | 1.3.0   | [`0x13a4…Ba1F`](https://testnet.sonicscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Monad     | Testnet  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.monadexplorer.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet-explorer.optimism.io/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Polygon   | Amoy     | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://amoy.polygonscan.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Sei       | Testnet  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.seistream.app/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
+| Sonic     | Testnet  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.sonicscan.org/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Unichain  | Sepolia  | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.uniscan.xyz/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | World Chain | Sepolia | USDC          | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://sepolia.worldscan.org/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Plasma    | Testnet  | USDT0         | Planned  | **no**    | —       | — |
@@ -542,9 +542,12 @@ See `contracts/.env.example` for the full set of environment variables.
 
 The script uses plain `CREATE`, so the deployed address derives from `(deployer, nonce)` and not
 from the code. Two chains share an address only when the deployer's nonce happens to match on
-both — which is why every 1.3.0 deployment landed on one address (nonce 0 everywhere) and why no
-later release can be expected to. A shared address is therefore not evidence of identical code;
-verify each deployment on its own.
+both — which they have so far, because the deployer has been used for deploys and nothing else,
+one per chain: nonce 0 for every 1.3.0 deployment, nonce 1 for every 1.4.0 one. That is a
+property of how the wallet has been used, not a guarantee the tooling provides: one stray
+transaction from it on a single chain and the next deploy there lands somewhere else. A shared
+address is therefore **not** evidence of identical code — verify each deployment on its own, with
+the reads below.
 
 #### Verification
 
