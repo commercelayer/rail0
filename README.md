@@ -49,6 +49,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Avalanche | Fuji     | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.snowtrace.io/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Base      | Sepolia  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://base-sepolia.blockscout.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Celo      | Sepolia  | USDC, USD₮    | **Live** | **no**    | 1.3.0   | [`0x13a4…Ba1F`](https://celo-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
+| Ethereum  | Sepolia  | USDC, PYUSD   | **Live** | yes       | 1.4.0   | [`0x13a4…Ba1F`](https://eth-sepolia.blockscout.com/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Monad     | Testnet  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet.monadexplorer.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Optimism  | Sepolia  | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://testnet-explorer.optimism.io/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
 | Polygon   | Amoy     | USDC          | **Live** | yes       | 1.4.0   | [`0xE6E6…9B1c`](https://amoy.polygonscan.com/address/0xE6E694Dc786Dc8a43152a4547b56A2433e7e9B1c) |
@@ -542,12 +543,18 @@ See `contracts/.env.example` for the full set of environment variables.
 
 The script uses plain `CREATE`, so the deployed address derives from `(deployer, nonce)` and not
 from the code. Two chains share an address only when the deployer's nonce happens to match on
-both — which they have so far, because the deployer has been used for deploys and nothing else,
-one per chain: nonce 0 for every 1.3.0 deployment, nonce 1 for every 1.4.0 one. That is a
-property of how the wallet has been used, not a guarantee the tooling provides: one stray
-transaction from it on a single chain and the next deploy there lands somewhere else. A shared
-address is therefore **not** evidence of identical code — verify each deployment on its own, with
-the reads below.
+both. For a while that produced a tidy rule — the deployer had been used for deploys and nothing
+else, one per chain, so nonce 0 carried every 1.3.0 deployment and nonce 1 every 1.4.0 one.
+
+**Ethereum Sepolia broke that rule on 2026-09-22**, and the table above now shows the
+consequence. The deployer had never deployed on that chain, so it was still at nonce 0 there and
+1.4.0 landed on `0x13a4…Ba1F` — the same address that carries **1.3.0** on Celo, Unichain and
+World Chain Sepolia. One address, two different versions, in one table.
+
+That is the whole point rather than an anomaly: the shared address was always a property of how
+the wallet had been used, not a guarantee the tooling provides, and one stray transaction from it
+on a single chain moves the next deploy there. A shared address is **not** evidence of identical
+code — verify each deployment on its own, with the reads below.
 
 #### Verification
 
