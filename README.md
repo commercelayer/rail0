@@ -67,7 +67,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Avalanche   | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
 | Base        | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
 | Celo        | Mainnet  | USDC, USD₮    | Planned           | yes       | —       | — |
-| Ethereum    | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
+| Ethereum    | Mainnet  | USDC, PYUSD   | Planned           | yes       | —       | — |
 | Monad       | Mainnet  | USDC          | Planned           | yes       | —       | — |
 | Optimism    | Mainnet  | USDC          | Planned           | yes       | —       | — |
 | Polygon     | Mainnet  | USDC          | Planned           | yes       | —       | — |
