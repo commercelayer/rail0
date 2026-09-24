@@ -1,9 +1,9 @@
 # Format, build, lint and test on every push and pull request.
 #
 # Until now this repo had no CI at all — no .github directory. A regression in the
-# 113-test suite, or drift in the carefully tuned [fmt]/[lint] config in
-# contracts/foundry.toml, could merge unnoticed. On a contract deployed to six live
-# chains with no upgrade path, that is the wrong place to rely on whoever remembered to
+# test suite, or drift in the carefully tuned [fmt]/[lint] config in
+# contracts/foundry.toml, could merge unnoticed. On a contract deployed to every live
+# chain with no upgrade path, that is the wrong place to rely on whoever remembered to
 # run the commands locally. (#40)
 #
 # Two repo-specific details this has to get right:

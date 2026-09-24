@@ -9,8 +9,8 @@ optimizer = true
 # called for the life of the deployment, so the trade is one-time deploy gas
 # (~+550k) and bytecode size (8.0k -> 10.7k, ample headroom under the 24,576
 # limit) for a measured ~360-640 gas saved on EVERY operation (capture, refund,
-# authorize, ...). Bytecode differs from the v1.x deployments (200 runs) --
-# verification metadata must use this value from v2.0.0 onward.
+# authorize, ...). Bytecode differs from the v1.3.x-and-earlier deployments (200
+# runs) -- verification metadata must use this value from v1.4.0 onward.
 optimizer_runs = 10_000
 via_ir = true
 # Pinned rather than inherited from forge's default (today "prague"): the contract
@@ -32,12 +32,12 @@ bracket_spacing = true
 # inline assembly hurts readability — not worth the trade.
 exclude_lints = ["asm-keccak256"]
 
-# The DEPLOYMENT SET, and only it. Every chain the README lists as Live gets an RPC
-# and a verifier here, so a redeploy or a verification runs from this file instead of
-# out-of-band URLs. Chains that do not run RAIL0 are deliberately absent — listing
-# them advertised support that does not exist: Tempo cannot run it at all (TIP-20 has
-# no EIP-3009), Plasma's testnet is still Planned, and Moderato appeared nowhere in
-# the README. Every chain id below was checked against its endpoint's eth_chainId.
+# A SUBSET of the deployment set: not every chain the README lists as Live has an
+# RPC and a verifier here — the rest deploy and verify with explicit --rpc-url /
+# --verifier-url flags. Every entry below does run RAIL0. Chains that do not are
+# deliberately absent — listing them advertised support that does not exist: Tempo
+# cannot run it at all (TIP-20 has no EIP-3009), Plasma's testnet is still Planned,
+# and Moderato appeared nowhere in the README. Every chain id below was checked against its endpoint's eth_chainId.
 [rpc_endpoints]
 arbitrum-sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
 arc-testnet      = "https://rpc.testnet.arc.network"
