@@ -126,7 +126,7 @@ A payment moves through two sequential time windows defined by the configuration
 - Until **`refundExpiry`**, the merchant can `refund` any captured portion back to the buyer.
 - While the refund window is open, the buyer can raise a `dispute` against captured funds — a signal-only open/close record that moves no money.
 
-The expiries must satisfy `authorizationExpiry ≤ refundExpiry`. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so one field controls both the submission deadline and (for `authorize`) the merchant's capture window. Every operation is merchant-submitted, with one exception: `release`, which either the payer or the payee may submit.
+The expiries must satisfy `refundExpiry − authorizationExpiry ≥ MIN_REFUND_WINDOW` (1 day), so every payment keeps a usable refund/dispute window. The window for opening the payment is bounded by `authorizationExpiry` itself — _rail0_ pins the buyer's EIP-3009 `validBefore` to that timestamp at submission, so one field controls both the submission deadline and (for `authorize`) the merchant's capture window. Every fund-moving operation is merchant-submitted, with one exception: `release`, which either the payer or the payee may submit. The buyer's `dispute` / `closeDispute` signal is payer-submitted.
 
 ### Lifecycle
 
@@ -138,7 +138,7 @@ function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, by
 
 Buyer escrows `p.amount` of the stablecoin in the contract, holding it for the merchant to capture later.
 
-The buyer signs an **EIP-3009 `ReceiveWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order and not in the past, addresses non-zero, payer and payee distinct, token allowlisted), records the payment state, then calls `token.receiveWithAuthorization(...)` with the deterministic nonce and pinned validity window. The receive variant matters: the token enforces `msg.sender == to`, so the buyer's signature is spendable only through _rail0_ — lifted from the mempool, it is worthless to anyone else. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` the hold — but only while nothing has been captured yet; otherwise `release` opens after `authorizationExpiry`.
+The buyer signs an **EIP-3009 `ReceiveWithAuthorization`** over the token's domain with `from = p.payer`, `to = address(rail0)`, `value = p.amount`, `validAfter = 0`, `validBefore = p.authorizationExpiry`, and `nonce = keccak256(_AUTHORIZE_NONCE_PREFIX, paymentId, configHash)`. The merchant submits. The contract validates the config (expiries in order, at least `MIN_REFUND_WINDOW` apart, and not in the past, addresses non-zero, payer and payee distinct, token allowlisted), records the payment state, then calls `token.receiveWithAuthorization(...)` with the deterministic nonce and pinned validity window. The receive variant matters: the token enforces `msg.sender == to`, so the buyer's signature is spendable only through _rail0_ — lifted from the mempool, it is worthless to anyone else. The token's own EIP-712 check verifies the signature; if any Payment term was tampered, the recovered signer won't match `p.payer` and the token reverts. The deterministic nonce is what binds the buyer's signature to the exact terms — no separate intent typehash needed. Once authorized, the merchant may `capture` (one or more times, up to `p.amount`) before `authorizationExpiry`, or `void` the hold — but only while nothing has been captured yet; otherwise `release` opens after `authorizationExpiry`.
 
 #### Charge
 
@@ -201,7 +201,7 @@ function dispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external
 function closeDispute(bytes32 paymentId, Payment calldata p, bytes32 reason) external;
 ```
 
-Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no fund effect** — opening or closing a dispute never moves, blocks, or escrows anything. It is a permanent, censorship-resistant on-chain record that the buyer is contesting a payment; off-chain systems react to it, typically by issuing a `refund`. These are the only entrypoints a buyer drives directly without an EIP-3009 signature — plain calls authenticated by `msg.sender`, and because they make no external calls they are **not** `nonReentrant`.
+Buyer-driven dispute signal with an on-chain open/close lifecycle. **It has no fund effect** — opening or closing a dispute never moves, blocks, or escrows anything. It is a permanent, censorship-resistant on-chain record that the buyer is contesting a payment; off-chain systems react to it, typically by issuing a `refund`. These are the only payer-only entrypoints — plain calls authenticated by `msg.sender`, and because they make no external calls they are **not** `nonReentrant`.
 
 `dispute` opens a dispute. **Only the payer** may call, only while `block.timestamp < p.refundExpiry`, and only on funds the merchant actually holds (`refundableAmount > 0`; a pure uncaptured authorization is cancelled via `void`, never disputed — `NothingToDispute` otherwise). Reverts `AlreadyDisputed` if one is already open. Sets `disputed = true` and emits `PaymentDisputed(paymentId, payer, payee, reason)`. `reason` is a caller-supplied `bytes32` code whose meaning lives off-chain.
 
@@ -283,7 +283,7 @@ event PaymentCharged   (bytes32 indexed paymentId, address indexed payer, addres
 // reads the balance instead of folding every prior event over its own database —
 // a fold that silently misreports a partial capture as full whenever the event
 // stream has a gap. Free to emit: the values are already in memory for the state
-// write, so only the log payload grows (~0.4% of a capture).
+// write, so only the log payload grows (~0.3% of a capture).
 event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
 event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
 event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
@@ -307,7 +307,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
 | `InvalidAmount`             | `p.amount == 0`.                                                   |
-| `InvalidExpiries`           | Expiries are zero or out of order.                                 |
+| `InvalidExpiries`           | Expiries are zero, out of order, or less than `MIN_REFUND_WINDOW` (1 day) apart. |
 | `AuthorizationExpired`      | `timestamp >= authorizationExpiry`; `authorize`/`charge`/`capture`.|
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
 | `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
@@ -449,7 +449,7 @@ NONCE=$(cast call $RAIL0 "refundNonce(bytes32,bytes32,uint120,uint120)(bytes32)"
 #    validBefore = $REFUND_EXPIRY.
 STRUCT_HASH=$(cast keccak $(cast abi-encode \
   "f(bytes32,address,address,uint256,uint256,uint256,bytes32)" \
-  $TWA_TYPEHASH $PAYEE $RAIL0 50000000 0 $REFUND_EXPIRY $NONCE))
+  $RWA_TYPEHASH $PAYEE $RAIL0 50000000 0 $REFUND_EXPIRY $NONCE))
 DIGEST=$(cast keccak 0x1901${TOKEN_DOMAIN:2}${STRUCT_HASH:2})
 
 # 3. Merchant signs; split into v, r, s
@@ -477,8 +477,8 @@ cast send $RAIL0 "release(bytes32,$PAYMENT_TYPE)" \
 ### Reading state
 
 ```sh
-# Payment state: (bool exists, uint120 capturable, uint120 refundable)
-cast call $RAIL0 "getPaymentState(bytes32)((bool,uint120,uint120))" $PAYMENT_ID --rpc-url $RPC
+# Payment state: (bool exists, uint120 capturable, uint120 refundable, bool disputed)
+cast call $RAIL0 "getPaymentState(bytes32)((bool,uint120,uint120,bool))" $PAYMENT_ID --rpc-url $RPC
 
 # Stored config hash
 cast call $RAIL0 "getConfigHash(bytes32)(bytes32)" $PAYMENT_ID --rpc-url $RPC
@@ -491,9 +491,9 @@ cast call $RAIL0 "acceptedTokens()(address[])" --rpc-url $RPC
 
 #### `getPaymentState` is a cross-version compatibility surface
 
-It is not only a convenience view. **`getPaymentState(bytes32)` returns `(bool, uint120, uint120)`, and other repos depend on that shape.**
+It is not only a convenience view. **`getPaymentState(bytes32)` returns `(bool exists, uint120 capturableAmount, uint120 refundableAmount, bool disputed)`, and other repos depend on that shape.**
 
-rail0-indexer settles payments that are still open on a **superseded** deployment by reading the transaction receipt and this view — never events, because an indexer declares one event list per contract name and it is the current version's, so an older deployment's fund events match no declared signature and are not indexed. Reading state instead of events is what makes that path version-agnostic, and it is the only reason activating a new contract version does not strand every in-flight payment on the previous one.
+rail0-indexer settles payments that are still open on a **superseded** deployment by reading the transaction receipt — decoding the tx's own log when its event shape is one the sweeper knows, and falling back to this view when it is not — never the indexed events, because an indexer declares one event list per contract name and it is the current version's, so an older deployment's fund events match no declared signature and are not indexed. Reading state instead of events is what makes that path version-agnostic, and it is the only reason activating a new contract version does not strand every in-flight payment on the previous one.
 
 So a version that changes this shape breaks settlement for payments it never touches. Before shipping one:
 
@@ -521,9 +521,10 @@ The repo uses `forge-std` as a git submodule — clone with `--recurse-submodule
 cd contracts
 forge build
 forge test
+forge fmt --check && forge lint   # also enforced by CI
 ```
 
-The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, transferFrom-fails, and reentrant cases, so no fork or RPC is needed.
+The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, a blacklisting (frozen-address) token, and a reentrant token, plus a mocked non-returning `transfer`, so no fork or RPC is needed.
 
 ### Deployment
 
@@ -586,7 +587,8 @@ contracts/
 ├── src/
 │   ├── RAIL0.sol                  # the protocol contract
 │   └── interfaces/
-│       └── IERC20.sol             # IERC20 + IEIP3009 (ReceiveWithAuthorization)
+│       ├── IERC20.sol             # minimal ERC-20 (bool and non-returning transfer)
+│       └── IEIP3009.sol           # EIP-3009 subset (receiveWithAuthorization only)
 ├── script/
 │   └── Deploy.s.sol               # deploy script (reads RAIL0_ACCEPTED_TOKENS)
 └── test/
