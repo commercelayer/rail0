@@ -3,7 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 test = "test"
-solc = "0.8.31"
+solc = "0.8.37"
 optimizer = true
 # 10_000, not the 200 default: this contract deploys once per chain and is then
 # called for the life of the deployment, so the trade is one-time deploy gas
