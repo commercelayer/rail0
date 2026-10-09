@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/rail0_payoff_white.svg">
-  <img src="docs/assets/rail0_payoff_black.svg" alt="rail0 — Permissionless stablecoin payments for commerce" width="420">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/rail0_payoff_white.svg">
+  <img src="assets/rail0_payoff_black.svg" alt="rail0 — Permissionless stablecoin payments for commerce" width="420">
 </picture>
 
 A single immutable smart contract implementing the full **authorize → capture → refund**
@@ -16,7 +16,7 @@ _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) trans
 <br>
 
 <div align="center">
-  <img src="docs/assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" width="760">
+  <img src="assets/rail0_protocol_desktop.svg" alt="rail0 protocol flow: payer authorizes or charges into the rail0 escrow, the payee captures, and refund / void / release return funds to the payer" width="760">
 </div>
 
 ## At a glance
