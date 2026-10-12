@@ -165,7 +165,7 @@ Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and `validBefor
 #### Capture
 
 ```solidity
-function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external;
+function capture(bytes32 paymentId, Payment calldata p, uint120 amount) external;
 ```
 
 Merchant pulls funds from escrow into their wallet.
@@ -195,7 +195,7 @@ Buyer's safety net — return escrowed funds to the buyer if the merchant never 
 #### Refund
 
 ```solidity
-function refund(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s) external;
+function refund(bytes32 paymentId, Payment calldata p, uint120 amount, uint8 v, bytes32 r, bytes32 s) external;
 ```
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
@@ -230,7 +230,7 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 | Field                  | Type      | Meaning                                                          |
 |------------------------|-----------|------------------------------------------------------------------|
 | `payer`                | `address` | Buyer. Source of escrowed funds; signer of the EIP-3009 authorization. |
-| `payee`                | `address` | Merchant. Calls `capture`, `void`, `refund`. Recipient of captured funds. |
+| `payee`                | `address` | Merchant. Submits `authorize` / `charge`, then `capture`, `void`, `refund` (and may submit `release`). Recipient of captured funds. |
 | `token`                | `address` | ERC-20 stablecoin. Must be in the deployment's allowlist.        |
 | `amount`               | `uint120` | Exact amount the buyer commits to pay; signed as the EIP-3009 `value`. |
 | `authorizationExpiry`  | `uint48`  | Cutoff for `capture`; `release` opens after this timestamp.      |
@@ -256,7 +256,7 @@ A `TokenAccepted(address indexed token)` event is emitted from the constructor f
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.4.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version=VERSION, chainId, verifyingContract)` — `version` is the contract's `VERSION` constant (`"1.4.0"` today), so it moves with every release. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -296,10 +296,13 @@ event PaymentCharged   (bytes32 indexed paymentId, address indexed payer, addres
 // a fold that silently misreports a partial capture as full whenever the event
 // stream has a gap. Free to emit: the values are already in memory for the state
 // write, so only the log payload grows (~0.3% of a capture).
-event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
+// They also name the `token`: an indexer that starts after the authorize cannot
+// otherwise attribute the amounts to a currency (nothing on chain recovers it).
+event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+// `release` takes the payer or the payee, so the event names the actor like DisputeClosed does.
+event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address releasedBy, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
 
 // Dispute signal — no fund effect. `reason` is a caller-supplied bytes32 code (meaning off-chain).
 event PaymentDisputed  (bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
@@ -319,10 +322,12 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
 | `InvalidAmount`             | `p.amount == 0`.                                                   |
-| `InvalidExpiries`           | Expiries are zero, out of order, or less than `MIN_REFUND_WINDOW` (1 day) apart. |
+| `AuthorizationExpiryZero`   | `authorizationExpiry == 0`.                                        |
+| `ExpiriesOutOfOrder`        | `authorizationExpiry > refundExpiry`.                              |
+| `RefundWindowTooShort`      | `refundExpiry − authorizationExpiry < MIN_REFUND_WINDOW` (1 day). |
 | `AuthorizationExpired`      | `timestamp >= authorizationExpiry`; `authorize`/`charge`/`capture`.|
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
-| `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
+| `RefundExpired`             | `block.timestamp >= p.refundExpiry` at `refund` or `dispute`.      |
 | `ZeroAddress`               | `payer`, `payee`, or `token` is the zero address.                  |
 | `SelfPayment`               | `payer == payee` — a payment can't be sent from an address to itself. |
 | `InvalidCaptureAmount`      | `amount == 0` or `amount > capturableAmount`.                      |
@@ -439,12 +444,12 @@ cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint8,bytes32,bytes32)" \
 
 ```sh
 # Full capture
-cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint120)" \
   $PAYMENT_ID "$PAYMENT" 100000000 \
   --rpc-url $RPC --private-key $PAYEE_KEY
 
 # Partial capture (repeatable up to p.amount)
-cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint120)" \
   $PAYMENT_ID "$PAYMENT" 30000000 \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
@@ -471,7 +476,7 @@ SIG=$(cast wallet sign --no-hash --private-key $PAYEE_KEY $DIGEST)
 R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
 
 # 4. Merchant submits — funds always reach $PAYER
-cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
+cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint120,uint8,bytes32,bytes32)" \
   $PAYMENT_ID "$PAYMENT" 50000000 $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
@@ -518,6 +523,15 @@ So a version that changes this shape breaks settlement for payments it never tou
 The same applies to anything else that reads this view — the gateway lists its selector in its ABI registry alongside the write operations for exactly this reason.
 
 ## Development
+
+### Release branches
+
+Each contract release has a GitHub milestone and a branch of the same name
+(`v2.0.0`), cut from `main`. A change meant for that release opens its pull
+request **against the release branch** and carries the milestone; the branch
+merges into `main` once, with the version bump and the tag, and `main` is what
+is deployed. A pull request against `main` is for what ships independently of a
+contract version: docs, tooling, CI.
 
 The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted at `contracts/`.
 

@@ -30,7 +30,11 @@ bracket_spacing = true
 # `asm-keccak256` would micro-optimize keccak256 calls via inline assembly. The
 # saving is ~30 gas per call on functions that aren't in any hot loop, and
 # inline assembly hurts readability — not worth the trade.
-exclude_lints = ["asm-keccak256"]
+# `block-timestamp` warns on every `block.timestamp` comparison as a miner-
+# manipulation risk. Every comparison here is against a day-scale deadline
+# (authorizationExpiry, refundExpiry, MIN_REFUND_WINDOW): the seconds a block
+# producer can shift a timestamp change nothing, and the warning hid real ones.
+exclude_lints = ["asm-keccak256", "block-timestamp"]
 
 # A SUBSET of the deployment set: not every chain the README lists as Live has an
 # RPC and a verifier here — the rest deploy and verify with explicit --rpc-url /
