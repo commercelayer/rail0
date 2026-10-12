@@ -10,8 +10,9 @@ import { IERC20 } from "./interfaces/IERC20.sol";
 ///         (`receiveWithAuthorization`). Buyer-funded operations use a single
 ///         EIP-3009 signature: the buyer signs off-chain and the merchant submits the
 ///         transaction and pays gas natively, so no token allowance state is touched.
-///         Every operation is merchant-submitted, except `release`, which the payer or
-///         the payee may submit to return escrowed funds to the buyer.
+///         Every fund-moving operation is merchant-submitted, except `release`, which
+///         the payer or the payee may submit to return escrowed funds to the buyer.
+///         The dispute signals, `dispute` and `closeDispute`, are payer-submitted.
 /// @dev    No owner, no admin, no upgradeability. The token allowlist is set in the
 ///         constructor and immutable thereafter.
 contract RAIL0 {
@@ -51,17 +52,16 @@ contract RAIL0 {
 
     /// @dev Prefixes used to derive EIP-3009 nonces. A per-operation prefix ensures
     ///      signatures cannot be reused across operations.
-    ///      Refund nonces also encode the current refundableAmount so each partial
-    ///      refund has a unique, deterministic nonce tied to the payment's state at
-    ///      signing time — preventing replays and double-spending of the same position.
+    ///      Refund nonces also encode BOTH current balances (capturable and refundable)
+    ///      so each partial refund has a unique, deterministic nonce tied to the
+    ///      payment's state at signing time — see `_refundNonce` for why one balance
+    ///      alone could repeat (#36).
     bytes32 internal constant _AUTHORIZE_NONCE_PREFIX = keccak256("RAIL0.AUTHORIZE");
     bytes32 internal constant _CHARGE_NONCE_PREFIX = keccak256("RAIL0.CHARGE");
     bytes32 internal constant _REFUND_NONCE_PREFIX = keccak256("RAIL0.REFUND");
 
     bytes32 internal constant _NAME_HASH = keccak256(bytes("RAIL0"));
     bytes32 internal constant _VERSION_HASH = keccak256(bytes(VERSION));
-
-    /// @dev Reentrancy lock states.
 
     // ================================================================
     //  Domain separator (EIP-712)
@@ -506,10 +506,10 @@ contract RAIL0 {
     ///           validBefore = p.refundExpiry
     ///           nonce       = refundNonce(paymentId, configHash, capturableAmount, refundableAmount)
     ///
-    ///         The nonce encodes the current `refundableAmount` so each partial refund
-    ///         has a unique, deterministic nonce — preventing replay and double-spending
-    ///         of the same refund position. Only `p.payee` may submit; funds always reach
-    ///         `p.payer`.
+    ///         The nonce encodes both current balances so each partial refund has a
+    ///         unique, deterministic nonce — preventing replay and double-spending of
+    ///         the same refund position (#36). Only `p.payee` may submit; funds always
+    ///         reach `p.payer`.
     function refund(bytes32 paymentId, Payment calldata p, uint120 amount, uint8 sigV, bytes32 sigR, bytes32 sigS)
         external
         nonReentrant
