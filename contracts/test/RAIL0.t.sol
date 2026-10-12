@@ -288,7 +288,7 @@ contract RAIL0Test is Test {
 
     /// Submit `refund` — payee signs EIP-3009 off-chain and submits.
     /// Mints only the difference if payee's balance is insufficient.
-    function _refund(bytes32 paymentId, RAIL0.Payment memory p, uint256 amount) internal {
+    function _refund(bytes32 paymentId, RAIL0.Payment memory p, uint120 amount) internal {
         bytes32 configHash = rail0.getConfigHash(paymentId);
         RAIL0.PaymentState memory st0 = rail0.getPaymentState(paymentId);
         bytes32 nonce = rail0.refundNonce(paymentId, configHash, st0.capturableAmount, st0.refundableAmount);
@@ -2209,11 +2209,17 @@ contract RAIL0Test is Test {
     // must mirror) rather than against a hand-written literal.
 
     /// Re-declared locally: vm.expectEmit needs the event in the test's scope.
+    ///
+    /// These doubles as a golden signature check. Narrowing `amount` in the contract
+    /// made all four of these tests fail until they were narrowed too — which is the
+    /// clearest local evidence that topic0 changed, and why this cannot ship without a
+    /// version bump and a reindex. (#47)
     event PaymentCaptured(
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        address token,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2221,7 +2227,8 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        address token,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2229,7 +2236,9 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        address releasedBy,
+        address token,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2237,7 +2246,8 @@ contract RAIL0Test is Test {
         bytes32 indexed paymentId,
         address indexed payer,
         address indexed payee,
-        uint256 amount,
+        address token,
+        uint120 amount,
         uint120 capturableAmount,
         uint120 refundableAmount
     );
@@ -2248,7 +2258,7 @@ contract RAIL0Test is Test {
 
         // A partial capture moves 30 out of escrow and into the refundable bucket.
         vm.expectEmit(true, true, true, true);
-        emit PaymentCaptured(PAYMENT_ID, payer, payee, 30e6, 70e6, 30e6);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, address(token), 30e6, 70e6, 30e6);
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 30e6);
 
@@ -2268,7 +2278,7 @@ contract RAIL0Test is Test {
         rail0.capture(PAYMENT_ID, p, 30e6);
 
         vm.expectEmit(true, true, true, true);
-        emit PaymentCaptured(PAYMENT_ID, payer, payee, 20e6, 50e6, 50e6);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, address(token), 20e6, 50e6, 50e6);
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 20e6);
 
@@ -2280,7 +2290,7 @@ contract RAIL0Test is Test {
         _authorize(PAYMENT_ID, p);
 
         vm.expectEmit(true, true, true, true);
-        emit PaymentCaptured(PAYMENT_ID, payer, payee, 100e6, 0, 100e6);
+        emit PaymentCaptured(PAYMENT_ID, payer, payee, address(token), 100e6, 0, 100e6);
         vm.prank(payee);
         rail0.capture(PAYMENT_ID, p, 100e6);
     }
@@ -2291,7 +2301,7 @@ contract RAIL0Test is Test {
 
         // Void drains escrow; nothing was captured, so refundable stays 0.
         vm.expectEmit(true, true, true, true);
-        emit PaymentVoided(PAYMENT_ID, payer, payee, 100e6, 0, 0);
+        emit PaymentVoided(PAYMENT_ID, payer, payee, address(token), 100e6, 0, 0);
         vm.prank(payee);
         rail0.void(PAYMENT_ID, p);
     }
@@ -2308,7 +2318,7 @@ contract RAIL0Test is Test {
         vm.warp(uint256(p.authorizationExpiry));
 
         vm.expectEmit(true, true, true, true);
-        emit PaymentReleased(PAYMENT_ID, payer, payee, 60e6, 0, 40e6);
+        emit PaymentReleased(PAYMENT_ID, payer, payee, payer, address(token), 60e6, 0, 40e6);
         vm.prank(payer);
         rail0.release(PAYMENT_ID, p);
 
@@ -2329,7 +2339,7 @@ contract RAIL0Test is Test {
             _signReceive3009(payeeKey, token, payee, address(rail0), 50e6, 0, p.refundExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
-        emit PaymentRefunded(PAYMENT_ID, payer, payee, 50e6, 0, 50e6);
+        emit PaymentRefunded(PAYMENT_ID, payer, payee, address(token), 50e6, 0, 50e6);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 50e6, v, r, sig);
 
@@ -2346,7 +2356,7 @@ contract RAIL0Test is Test {
             _signReceive3009(payeeKey, token, payee, address(rail0), 100e6, 0, p.refundExpiry, nonce);
 
         vm.expectEmit(true, true, true, true);
-        emit PaymentRefunded(PAYMENT_ID, payer, payee, 100e6, 0, 0);
+        emit PaymentRefunded(PAYMENT_ID, payer, payee, address(token), 100e6, 0, 0);
         vm.prank(payee);
         rail0.refund(PAYMENT_ID, p, 100e6, v, r, sig);
 
