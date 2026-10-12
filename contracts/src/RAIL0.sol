@@ -132,6 +132,9 @@ contract RAIL0 {
         _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
 
         uint256 len = acceptedTokens.length;
+        // Same rule as the code check below, one level up: a deployment that accepts
+        // no token can never take a payment, and only the deploy script refused it.
+        if (len == 0) revert EmptyAllowlist();
         for (uint256 i = 0; i < len; ++i) {
             address t = acceptedTokens[i];
             if (t == address(0)) revert ZeroAddress();
@@ -273,6 +276,7 @@ contract RAIL0 {
     error TokenNotAccepted();
     error DuplicateToken();
     error TokenHasNoCode();
+    error EmptyAllowlist();
     error TransferFailed();
     error Reentrancy();
 

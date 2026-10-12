@@ -1407,12 +1407,6 @@ contract RAIL0Test is Test {
         assertEq(got[1], address(t2));
     }
 
-    function test_AcceptedTokens_EmptyWhenNoneAccepted() public {
-        address[] memory empty = new address[](0);
-        RAIL0 r = new RAIL0(empty);
-        assertEq(r.acceptedTokens().length, 0);
-    }
-
     function test_Constructor_EmitsTokenAccepted() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
@@ -1421,10 +1415,12 @@ contract RAIL0Test is Test {
         new RAIL0(tokens);
     }
 
-    function test_Constructor_AllowsEmptyList() public {
+    /// An allowlist with nothing on it is a deployment that can never take a payment:
+    /// refused on chain, not only by the deploy script.
+    function test_Constructor_RejectsEmptyList() public {
         address[] memory empty = new address[](0);
-        RAIL0 r = new RAIL0(empty);
-        assertFalse(r.isAcceptedToken(address(token)));
+        vm.expectRevert(RAIL0.EmptyAllowlist.selector);
+        new RAIL0(empty);
     }
 
     function test_TokenNotAccepted_Reverts() public {

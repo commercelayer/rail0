@@ -336,6 +336,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `TokenNotAccepted`          | `p.token` is not in the deployment's allowlist.                    |
 | `DuplicateToken`            | Constructor `acceptedTokens` contained the same address twice.     |
 | `TokenHasNoCode`            | Constructor `acceptedTokens` contained an address with no contract code. |
+| `EmptyAllowlist`            | Constructor `acceptedTokens` was empty — a deployment that could never take a payment. |
 | `TransferFailed`            | A token `transfer` returned `false` or reverted.                   |
 | `Reentrancy`                | A nested call attempted to reenter a guarded entrypoint.           |
 
