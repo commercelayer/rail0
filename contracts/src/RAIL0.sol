@@ -424,8 +424,20 @@ contract RAIL0 {
         uint120 captureAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
         // Held in locals so the same values serve the storage write and the event —
         // the post-event balances cost nothing extra to emit (see the event decls).
-        uint120 newCapturable = s.capturableAmount - captureAmount120;
-        uint120 newRefundable = s.refundableAmount + captureAmount120;
+        //
+        // UNCHECKED, on two guarantees that live right here: the subtraction cannot
+        // underflow because `amount <= capturableAmount` was checked three lines up;
+        // the addition cannot overflow uint120 because the two buckets never sum past
+        // `p.amount` (authorize sets them to (amount, 0), capture moves between them,
+        // refund only lowers one, void/release zero one — pinned by
+        // testFuzz_CaptureKeepsBucketsWithinAmount). Move or loosen either guard and
+        // this block must go back to checked arithmetic.
+        uint120 newCapturable;
+        uint120 newRefundable;
+        unchecked {
+            newCapturable = s.capturableAmount - captureAmount120;
+            newRefundable = s.refundableAmount + captureAmount120;
+        }
         _state[paymentId].capturableAmount = newCapturable;
         _state[paymentId].refundableAmount = newRefundable;
 
@@ -491,7 +503,12 @@ contract RAIL0 {
         uint120 refundAmount120 = uint120(amount); // forge-lint: disable-line(unsafe-typecast)
         // Local reused by the storage write, the dispute-close test below and the
         // event, so the post-refund balance is read once rather than re-loaded.
-        uint120 newRefundable = st.refundableAmount - refundAmount120;
+        // UNCHECKED: `amount <= refundableAmount` was checked three lines up, so the
+        // subtraction cannot underflow. Same caveat as capture: the guard is the proof.
+        uint120 newRefundable;
+        unchecked {
+            newRefundable = st.refundableAmount - refundAmount120;
+        }
         _state[paymentId].refundableAmount = newRefundable;
 
         // A full refund (one that zeroes refundableAmount) resolves any open dispute:
@@ -630,7 +647,11 @@ contract RAIL0 {
         // `>=`), which collapses the window to zero: refund and dispute both become
         // unreachable the instant the authorization ends, so a payment could be created
         // that is refundable in name only.
-        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
+        // UNCHECKED for the same reason the comment above gives: the ordering check
+        // guarantees `refundExpiry >= authorizationExpiry`, so no underflow.
+        unchecked {
+            if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
+        }
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
