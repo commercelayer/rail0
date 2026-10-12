@@ -164,8 +164,8 @@ contract RAIL0 {
         bool disputed; //   8 bits — buyer has an open dispute (signal only, no fund effect)
     }
 
-    mapping(bytes32 => PaymentState) internal _state;
-    mapping(bytes32 => bytes32) internal _configHash;
+    mapping(bytes32 => PaymentState) private _state;
+    mapping(bytes32 => bytes32) private _configHash;
 
     // ================================================================
     //  Events
@@ -266,7 +266,13 @@ contract RAIL0 {
     error PaymentNotFound();
     error PaymentMismatch();
     error InvalidAmount();
-    error InvalidExpiries();
+    /// @dev Three errors where there was one: a zero authorization expiry, expiries
+    ///      out of order, and a refund window under MIN_REFUND_WINDOW each want a
+    ///      different fix from the caller, and `InvalidExpiries` told them apart only
+    ///      by re-reading the source.
+    error AuthorizationExpiryZero();
+    error ExpiriesOutOfOrder();
+    error RefundWindowTooShort();
     error AuthorizationExpired();
     error AuthorizationNotExpired();
     error RefundExpired();
@@ -305,7 +311,10 @@ contract RAIL0 {
     ///         could be lifted from the mempool and submitted straight to the token by
     ///         anyone — funds would land here with no `PaymentState` ever created, and no
     ///         payout path can reach them (#35).
-    function authorize(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
+    function authorize(bytes32 paymentId, Payment calldata p, uint8 sigV, bytes32 sigR, bytes32 sigS)
+        external
+        nonReentrant
+    {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -326,9 +335,9 @@ contract RAIL0 {
                 0,
                 p.authorizationExpiry,
                 _authorizeNonce(paymentId, configHash),
-                v,
-                r,
-                s
+                sigV,
+                sigR,
+                sigS
             );
 
         emit PaymentAuthorized(paymentId, p.payer, p.payee, p);
@@ -342,7 +351,10 @@ contract RAIL0 {
     ///         `authorizationExpiry` is the submission deadline only — there is no
     ///         escrow window because the contract immediately forwards the buyer's
     ///         funds to `payee`. Only `p.payee` (the merchant) may submit.
-    function charge(bytes32 paymentId, Payment calldata p, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
+    function charge(bytes32 paymentId, Payment calldata p, uint8 sigV, bytes32 sigR, bytes32 sigS)
+        external
+        nonReentrant
+    {
         if (msg.sender != p.payee) revert NotPayee();
         if (_state[paymentId].exists) revert PaymentAlreadyExists();
         _validatePayment(p);
@@ -354,7 +366,15 @@ contract RAIL0 {
 
         IEIP3009(p.token)
             .receiveWithAuthorization(
-                p.payer, address(this), p.amount, 0, p.authorizationExpiry, _chargeNonce(paymentId, configHash), v, r, s
+                p.payer,
+                address(this),
+                p.amount,
+                0,
+                p.authorizationExpiry,
+                _chargeNonce(paymentId, configHash),
+                sigV,
+                sigR,
+                sigS
             );
 
         _safeTransfer(p.token, p.payee, p.amount);
@@ -490,24 +510,24 @@ contract RAIL0 {
     ///         unique, deterministic nonce — preventing replay and double-spending of
     ///         the same refund position (#36). Only `p.payee` may submit; funds always
     ///         reach `p.payer`.
-    function refund(bytes32 paymentId, Payment calldata p, uint120 amount, uint8 v, bytes32 r, bytes32 s)
+    function refund(bytes32 paymentId, Payment calldata p, uint120 amount, uint8 sigV, bytes32 sigR, bytes32 sigS)
         external
         nonReentrant
     {
         if (msg.sender != p.payee) revert NotPayee();
-        (PaymentState memory st, bytes32 configHash) = _loadAndVerify(paymentId, p);
+        (PaymentState memory s, bytes32 configHash) = _loadAndVerify(paymentId, p);
         if (block.timestamp >= p.refundExpiry) revert RefundExpired();
-        if (amount == 0 || amount > st.refundableAmount) revert InvalidRefundAmount();
+        if (amount == 0 || amount > s.refundableAmount) revert InvalidRefundAmount();
 
         // Local reused by the storage write, the dispute-close test below and the
         // event, so the post-refund balance is read once rather than re-loaded.
-        uint120 newRefundable = st.refundableAmount - amount;
+        uint120 newRefundable = s.refundableAmount - amount;
         _state[paymentId].refundableAmount = newRefundable;
 
         // A full refund (one that zeroes refundableAmount) resolves any open dispute:
         // clear the flag and emit the close event with the reserved reason. Effects only —
         // this sits before the external calls, preserving checks-effects-interactions.
-        if (st.disputed && newRefundable == 0) {
+        if (s.disputed && newRefundable == 0) {
             _state[paymentId].disputed = false;
             emit DisputeClosed(paymentId, p.payer, p.payee, msg.sender, REASON_FULL_REFUND);
         }
@@ -521,17 +541,17 @@ contract RAIL0 {
                 amount,
                 0, // validAfter: available immediately
                 p.refundExpiry, // validBefore: same as on-chain refund deadline
-                _refundNonce(paymentId, configHash, st.capturableAmount, st.refundableAmount),
-                v,
-                r,
-                s
+                _refundNonce(paymentId, configHash, s.capturableAmount, s.refundableAmount),
+                sigV,
+                sigR,
+                sigS
             );
 
         _safeTransfer(p.token, p.payer, amount);
 
         // Refund draws down the refundable bucket only; escrow is untouched, so
         // capturable is st.capturableAmount as loaded.
-        emit PaymentRefunded(paymentId, p.payer, p.payee, p.token, amount, st.capturableAmount, newRefundable);
+        emit PaymentRefunded(paymentId, p.payer, p.payee, p.token, amount, s.capturableAmount, newRefundable);
     }
 
     // ================================================================
@@ -630,8 +650,8 @@ contract RAIL0 {
 
     function _validatePayment(Payment calldata p) internal view {
         if (p.amount == 0) revert InvalidAmount();
-        if (p.authorizationExpiry == 0) revert InvalidExpiries();
-        if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
+        if (p.authorizationExpiry == 0) revert AuthorizationExpiryZero();
+        if (p.authorizationExpiry > p.refundExpiry) revert ExpiriesOutOfOrder();
         // A refund/dispute window of at least MIN_REFUND_WINDOW. The ordering check
         // above is what makes this subtraction safe — refundExpiry >= authorizationExpiry
         // is already guaranteed, so it cannot underflow.
@@ -640,7 +660,7 @@ contract RAIL0 {
         // `>=`), which collapses the window to zero: refund and dispute both become
         // unreachable the instant the authorization ends, so a payment could be created
         // that is refundable in name only.
-        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
+        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert RefundWindowTooShort();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();
