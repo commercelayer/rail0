@@ -252,7 +252,13 @@ contract RAIL0 {
     error PaymentNotFound();
     error PaymentMismatch();
     error InvalidAmount();
-    error InvalidExpiries();
+    /// @dev Three errors where there was one: a zero authorization expiry, expiries
+    ///      out of order, and a refund window under MIN_REFUND_WINDOW each want a
+    ///      different fix from the caller, and `InvalidExpiries` told them apart only
+    ///      by re-reading the source.
+    error AuthorizationExpiryZero();
+    error ExpiriesOutOfOrder();
+    error RefundWindowTooShort();
     error AuthorizationExpired();
     error AuthorizationNotExpired();
     error RefundExpired();
@@ -620,8 +626,8 @@ contract RAIL0 {
 
     function _validatePayment(Payment calldata p) internal view {
         if (p.amount == 0) revert InvalidAmount();
-        if (p.authorizationExpiry == 0) revert InvalidExpiries();
-        if (p.authorizationExpiry > p.refundExpiry) revert InvalidExpiries();
+        if (p.authorizationExpiry == 0) revert AuthorizationExpiryZero();
+        if (p.authorizationExpiry > p.refundExpiry) revert ExpiriesOutOfOrder();
         // A refund/dispute window of at least MIN_REFUND_WINDOW. The ordering check
         // above is what makes this subtraction safe — refundExpiry >= authorizationExpiry
         // is already guaranteed, so it cannot underflow.
@@ -630,7 +636,7 @@ contract RAIL0 {
         // `>=`), which collapses the window to zero: refund and dispute both become
         // unreachable the instant the authorization ends, so a payment could be created
         // that is refundable in name only.
-        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert InvalidExpiries();
+        if (p.refundExpiry - p.authorizationExpiry < MIN_REFUND_WINDOW) revert RefundWindowTooShort();
         if (block.timestamp >= p.authorizationExpiry) revert AuthorizationExpired();
         if (p.payer == address(0) || p.payee == address(0) || p.token == address(0)) {
             revert ZeroAddress();

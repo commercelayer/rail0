@@ -319,7 +319,9 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `PaymentNotFound`           | `paymentId` has no state.                                          |
 | `PaymentMismatch`           | The `Payment` struct passed in does not match the stored hash.     |
 | `InvalidAmount`             | `p.amount == 0`.                                                   |
-| `InvalidExpiries`           | Expiries are zero, out of order, or less than `MIN_REFUND_WINDOW` (1 day) apart. |
+| `AuthorizationExpiryZero`   | `authorizationExpiry == 0`.                                        |
+| `ExpiriesOutOfOrder`        | `authorizationExpiry > refundExpiry`.                              |
+| `RefundWindowTooShort`      | `refundExpiry − authorizationExpiry < MIN_REFUND_WINDOW` (1 day). |
 | `AuthorizationExpired`      | `timestamp >= authorizationExpiry`; `authorize`/`charge`/`capture`.|
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
 | `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |

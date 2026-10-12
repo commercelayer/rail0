@@ -1449,7 +1449,7 @@ contract RAIL0Test is Test {
         p.refundExpiry = uint48(block.timestamp + 7 days);
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.ExpiriesOutOfOrder.selector);
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
@@ -1459,7 +1459,7 @@ contract RAIL0Test is Test {
         p.authorizationExpiry = 0;
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.AuthorizationExpiryZero.selector);
         vm.prank(payee);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
@@ -1512,7 +1512,7 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.prank(payee);
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.RefundWindowTooShort.selector);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
@@ -1534,7 +1534,7 @@ contract RAIL0Test is Test {
         tooTight.refundExpiry = authExpiry + rail0.MIN_REFUND_WINDOW() - 1;
         (v, r, s) = _signForAuthorize(tooTight);
         vm.prank(payee);
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.RefundWindowTooShort.selector);
         rail0.authorize(keccak256("too-tight"), tooTight, v, r, s);
     }
 
@@ -1551,7 +1551,7 @@ contract RAIL0Test is Test {
             _signReceive3009(payerKey, token, payer, address(rail0), p.amount, 0, p.authorizationExpiry, nonce);
 
         vm.prank(payee);
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.RefundWindowTooShort.selector);
         rail0.charge(PAYMENT_ID, p, v, r, s);
     }
 
@@ -1563,7 +1563,7 @@ contract RAIL0Test is Test {
         (uint8 v, bytes32 r, bytes32 s) = _signForAuthorize(p);
 
         vm.prank(payee);
-        vm.expectRevert(RAIL0.InvalidExpiries.selector);
+        vm.expectRevert(RAIL0.RefundWindowTooShort.selector);
         rail0.authorize(PAYMENT_ID, p, v, r, s);
     }
 
