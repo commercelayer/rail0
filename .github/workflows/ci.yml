@@ -8,9 +8,9 @@
 #
 # Two repo-specific details this has to get right:
 #
-#   * forge-std is a git SUBMODULE pinned to v1.16.1 (see .gitmodules and
-#     foundry.lock), so the checkout must be recursive — without it `forge build`
-#     fails on a missing lib.
+#   * forge-std is a git SUBMODULE pinned in foundry.lock (v1.17.0 at the time of
+#     writing), so the checkout must be recursive — without it `forge build` fails
+#     on a missing lib.
 #   * foundry.toml lives in contracts/, not the repo root, so every forge command runs
 #     from there.
 name: ci
@@ -35,8 +35,13 @@ jobs:
         with:
           submodules: recursive
 
+      # Pinned: unpinned, the action installs the current nightly, and `forge fmt`
+      # and `forge lint` output moves between nightlies — a CI that goes red with no
+      # change to the code. Bump deliberately, together with the local toolchain.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       # solc is pinned in foundry.toml (0.8.37), so this compiles with the same
       # compiler the deployments used rather than whatever ships with the toolchain.

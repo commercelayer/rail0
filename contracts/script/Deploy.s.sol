@@ -34,6 +34,11 @@ contract Deploy is Script {
 
         console2.log("RAIL0 deployed at:", address(rail0));
         console2.log("VERSION:", rail0.VERSION());
+        // The two values a deployment record needs beside the address: the chain the
+        // domain separator was built for, and the separator itself (what every
+        // integrator's EIP-712 signing has to reproduce).
+        console2.log("chainId:", block.chainid);
+        console2.logBytes32(rail0.DOMAIN_SEPARATOR());
         console2.log("Accepted tokens:");
         for (uint256 i = 0; i < tokens.length; i++) {
             console2.log("  -", tokens[i]);
