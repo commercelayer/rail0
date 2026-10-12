@@ -161,6 +161,27 @@ contract MockTransferFails is MockERC20 {
     }
 }
 
+/// Token whose `transfer` REVERTS instead of returning false — the other half of what
+/// `_safeTransfer` promises to catch ("returned false or reverted"), never exercised
+/// before: both failing mocks returned false.
+contract MockTransferReverts is MockERC20 {
+    function transfer(address, uint256) external pure override returns (bool) {
+        revert("issuer says no");
+    }
+}
+
+/// Token whose `transfer` returns ONE byte. Not a bool the ABI can decode: the point
+/// is to pin what `_safeTransfer` does with a malformed return — it reverts, but not
+/// with TransferFailed, which the test documents.
+contract MockTransferShortReturn is MockERC20 {
+    function transfer(address, uint256) external pure override returns (bool) {
+        assembly {
+            mstore(0, 1)
+            return(0, 1)
+        }
+    }
+}
+
 /// Token whose receiveWithAuthorization calls back into RAIL0 (reentrancy attempt).
 contract MockReentrant {
     bool public reenterAttempted;
@@ -973,6 +994,27 @@ contract RAIL0Test is Test {
         rail0.release(PAYMENT_ID, p);
     }
 
+    /// `release` zeroes the capturable bucket and nothing else: an open dispute on the
+    /// captured part survives it, as it must — the refundable bucket it disputes is
+    /// untouched.
+    function test_Release_KeepsAnOpenDispute() public {
+        RAIL0.Payment memory p = _payment();
+        _authorize(PAYMENT_ID, p);
+        vm.prank(payee);
+        rail0.capture(PAYMENT_ID, p, 40e6);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        vm.warp(uint256(p.authorizationExpiry));
+        vm.prank(payer);
+        rail0.release(PAYMENT_ID, p);
+
+        RAIL0.PaymentState memory s = rail0.getPaymentState(PAYMENT_ID);
+        assertEq(s.capturableAmount, 0);
+        assertEq(s.refundableAmount, 40e6);
+        assertTrue(s.disputed, "release must not close the dispute");
+    }
+
     function test_Release_RevertsIfNonExistent() public {
         RAIL0.Payment memory p = _payment();
         vm.warp(authorizationExpiry);
@@ -1247,6 +1289,25 @@ contract RAIL0Test is Test {
 
         vm.prank(makeAddr("stranger"));
         vm.expectRevert(RAIL0.NotPayer.selector);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_CloseDispute_RevertsIfNonExistent() public {
+        RAIL0.Payment memory p = _payment();
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.PaymentNotFound.selector);
+        rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
+    }
+
+    function test_CloseDispute_RevertsIfPaymentMismatch() public {
+        RAIL0.Payment memory p = _payment();
+        _charge(PAYMENT_ID, p);
+        vm.prank(payer);
+        rail0.dispute(PAYMENT_ID, p, DISPUTE_REASON);
+
+        p.amount = 9999e6; // any tampered field
+        vm.prank(payer);
+        vm.expectRevert(RAIL0.PaymentMismatch.selector);
         rail0.closeDispute(PAYMENT_ID, p, DISPUTE_REASON);
     }
 
@@ -1767,6 +1828,53 @@ contract RAIL0Test is Test {
         vm.prank(payee);
         vm.expectRevert(RAIL0.TransferFailed.selector);
         r.void(PAYMENT_ID, p);
+    }
+
+    /// The README promises TransferFailed when the token "returned false OR reverted";
+    /// only the first half was pinned.
+    function test_SafeTransfer_RevertsOnTokenRevert() public {
+        MockTransferReverts reverting = new MockTransferReverts();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(reverting);
+        RAIL0 r = new RAIL0(tokens);
+
+        reverting.mint(payer, 1000e6);
+        RAIL0.Payment memory p = _payment();
+        p.token = address(reverting);
+        bytes32 cfg = r.hashPayment(p);
+        bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
+        (uint8 v, bytes32 rr, bytes32 ss) =
+            _signReceive3009(payerKey, reverting, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        vm.prank(payee);
+        r.authorize(PAYMENT_ID, p, v, rr, ss);
+
+        vm.prank(payee);
+        vm.expectRevert(RAIL0.TransferFailed.selector);
+        r.void(PAYMENT_ID, p);
+    }
+
+    /// A malformed return (1..31 bytes) is refused too — by `abi.decode`, so NOT with
+    /// TransferFailed. Pinned as documentation: the funds stay put either way.
+    function test_SafeTransfer_RevertsOnMalformedReturn() public {
+        MockTransferShortReturn malformed = new MockTransferShortReturn();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(malformed);
+        RAIL0 r = new RAIL0(tokens);
+
+        malformed.mint(payer, 1000e6);
+        RAIL0.Payment memory p = _payment();
+        p.token = address(malformed);
+        bytes32 cfg = r.hashPayment(p);
+        bytes32 nonce = r.authorizeNonce(PAYMENT_ID, cfg);
+        (uint8 v, bytes32 rr, bytes32 ss) =
+            _signReceive3009(payerKey, malformed, payer, address(r), p.amount, 0, authorizationExpiry, nonce);
+        vm.prank(payee);
+        r.authorize(PAYMENT_ID, p, v, rr, ss);
+
+        vm.prank(payee);
+        vm.expectRevert(); // abi.decode's own revert, not TransferFailed
+        r.void(PAYMENT_ID, p);
+        assertEq(r.getPaymentState(PAYMENT_ID).capturableAmount, 100e6, "escrow untouched");
     }
 
     /// ACCEPTED RISK, pinned so a future change surfaces it (#39).

@@ -230,7 +230,7 @@ A payment's terms are committed at authorization time and immutable thereafter. 
 | Field                  | Type      | Meaning                                                          |
 |------------------------|-----------|------------------------------------------------------------------|
 | `payer`                | `address` | Buyer. Source of escrowed funds; signer of the EIP-3009 authorization. |
-| `payee`                | `address` | Merchant. Calls `capture`, `void`, `refund`. Recipient of captured funds. |
+| `payee`                | `address` | Merchant. Submits `authorize` / `charge`, then `capture`, `void`, `refund` (and may submit `release`). Recipient of captured funds. |
 | `token`                | `address` | ERC-20 stablecoin. Must be in the deployment's allowlist.        |
 | `amount`               | `uint120` | Exact amount the buyer commits to pay; signed as the EIP-3009 `value`. |
 | `authorizationExpiry`  | `uint48`  | Cutoff for `capture`; `release` opens after this timestamp.      |
@@ -256,7 +256,7 @@ A `TokenAccepted(address indexed token)` event is emitted from the constructor f
 
 ### Config commitment (EIP-712)
 
-The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version="1.4.0", chainId, verifyingContract)`. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
+The `Payment` struct is hashed with EIP-712 typed-data encoding using the domain `EIP712Domain(name="RAIL0", version=VERSION, chainId, verifyingContract)` — `version` is the contract's `VERSION` constant (`"1.4.0"` today), so it moves with every release. The digest is stored at `_configHash[paymentId]` on first call (`authorize`/`charge`) and re-checked on every subsequent call via `_loadAndVerify`. Tampering with any field causes a `PaymentMismatch` revert.
 
 Buyer-initiated operations don't introduce a separate _rail0_-domain signing typehash. Instead, _rail0_ derives a deterministic EIP-3009 nonce from the operation context:
 
@@ -327,7 +327,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 | `RefundWindowTooShort`      | `refundExpiry − authorizationExpiry < MIN_REFUND_WINDOW` (1 day). |
 | `AuthorizationExpired`      | `timestamp >= authorizationExpiry`; `authorize`/`charge`/`capture`.|
 | `AuthorizationNotExpired`   | `release` called before `authorizationExpiry`.                     |
-| `RefundExpired`             | `block.timestamp >= p.refundExpiry` at refund.                     |
+| `RefundExpired`             | `block.timestamp >= p.refundExpiry` at `refund` or `dispute`.      |
 | `ZeroAddress`               | `payer`, `payee`, or `token` is the zero address.                  |
 | `SelfPayment`               | `payer == payee` — a payment can't be sent from an address to itself. |
 | `InvalidCaptureAmount`      | `amount == 0` or `amount > capturableAmount`.                      |
@@ -521,6 +521,15 @@ So a version that changes this shape breaks settlement for payments it never tou
 The same applies to anything else that reads this view — the gateway lists its selector in its ABI registry alongside the write operations for exactly this reason.
 
 ## Development
+
+### Release branches
+
+Each contract release has a GitHub milestone and a branch of the same name
+(`v2.0.0`), cut from `main`. A change meant for that release opens its pull
+request **against the release branch** and carries the milestone; the branch
+merges into `main` once, with the version bump and the tag, and `main` is what
+is deployed. A pull request against `main` is for what ships independently of a
+contract version: docs, tooling, CI.
 
 The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted at `contracts/`.
 
