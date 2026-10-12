@@ -165,7 +165,7 @@ Same EIP-3009 pattern as `authorize` (including `validAfter = 0` and `validBefor
 #### Capture
 
 ```solidity
-function capture(bytes32 paymentId, Payment calldata p, uint256 amount) external;
+function capture(bytes32 paymentId, Payment calldata p, uint120 amount) external;
 ```
 
 Merchant pulls funds from escrow into their wallet.
@@ -195,7 +195,7 @@ Buyer's safety net — return escrowed funds to the buyer if the merchant never 
 #### Refund
 
 ```solidity
-function refund(bytes32 paymentId, Payment calldata p, uint256 amount, uint8 v, bytes32 r, bytes32 s) external;
+function refund(bytes32 paymentId, Payment calldata p, uint120 amount, uint8 v, bytes32 r, bytes32 s) external;
 ```
 
 Merchant reverses a prior capture, sending `amount` of the stablecoin back to the buyer.
@@ -296,10 +296,13 @@ event PaymentCharged   (bytes32 indexed paymentId, address indexed payer, addres
 // a fold that silently misreports a partial capture as full whenever the event
 // stream has a gap. Free to emit: the values are already in memory for the state
 // write, so only the log payload grows (~0.3% of a capture).
-event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
-event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, uint256 amount, uint120 capturableAmount, uint120 refundableAmount);
+// They also name the `token`: an indexer that starts after the authorize cannot
+// otherwise attribute the amounts to a currency (nothing on chain recovers it).
+event PaymentCaptured  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentVoided    (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+// `release` takes the payer or the payee, so the event names the actor like DisputeClosed does.
+event PaymentReleased  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address releasedBy, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
+event PaymentRefunded  (bytes32 indexed paymentId, address indexed payer, address indexed payee, address token, uint120 amount, uint120 capturableAmount, uint120 refundableAmount);
 
 // Dispute signal — no fund effect. `reason` is a caller-supplied bytes32 code (meaning off-chain).
 event PaymentDisputed  (bytes32 indexed paymentId, address indexed payer, address indexed payee, bytes32 reason);
@@ -439,12 +442,12 @@ cast send $RAIL0 "charge(bytes32,$PAYMENT_TYPE,uint8,bytes32,bytes32)" \
 
 ```sh
 # Full capture
-cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint120)" \
   $PAYMENT_ID "$PAYMENT" 100000000 \
   --rpc-url $RPC --private-key $PAYEE_KEY
 
 # Partial capture (repeatable up to p.amount)
-cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint256)" \
+cast send $RAIL0 "capture(bytes32,$PAYMENT_TYPE,uint120)" \
   $PAYMENT_ID "$PAYMENT" 30000000 \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
@@ -471,7 +474,7 @@ SIG=$(cast wallet sign --no-hash --private-key $PAYEE_KEY $DIGEST)
 R=0x${SIG:2:64}; S=0x${SIG:66:64}; V=0x${SIG:130:2}
 
 # 4. Merchant submits — funds always reach $PAYER
-cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint256,uint8,bytes32,bytes32)" \
+cast send $RAIL0 "refund(bytes32,$PAYMENT_TYPE,uint120,uint8,bytes32,bytes32)" \
   $PAYMENT_ID "$PAYMENT" 50000000 $V $R $S \
   --rpc-url $RPC --private-key $PAYEE_KEY
 ```
