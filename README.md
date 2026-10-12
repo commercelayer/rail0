@@ -6,7 +6,7 @@
 A single immutable smart contract implementing the full **authorize → capture → refund**
 lifecycle for stablecoin payments — no owner, no admin, no fees, no privileged operator.
 
-[**rail0.xyz**](https://rail0.xyz) · [Protocol](#protocol) · [Examples](#examples) · [Development](#development)
+[**rail0.xyz**](https://rail0.xyz) · [Clients](#clients) · [Protocol](#protocol) · [Examples](#examples) · [Development](#development)
 
 ---
 
@@ -27,6 +27,18 @@ _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) trans
 - **Card-network primitives on-chain.** `authorize → capture → refund`, plus `charge`, `void`, `release`, and a signal-only `dispute`.
 - **Time-based recourse only.** `release` (after `authorizationExpiry`) and the merchant's discretionary `refund` are the only paths that return funds to the buyer; there is no arbitration layer.
 - **Portable.** Runs on any EVM that compiles Solidity 0.8.37 with EIP-3009-capable tokens.
+
+## Clients
+
+The contract needs nothing but a wallet and an RPC — the [Examples](#examples) below call it with `cast`. For an application, the official clients wrap the full lifecycle through the rail0 gateway: payment records and webhooks off-chain, the EIP-3009 and transaction signing locally, and one vocabulary everywhere — `authorize → capture`, `charge`, `void`, `release`, `refund`, `dispute`. Every client is generated from the same gateway API schema, so they carry the same types and the same error codes.
+
+| Client | Install | Source |
+| --- | --- | --- |
+| TypeScript SDK — `@commercelayer/rail0-sdk` (Node and browser, no node builtins) | `npm install @commercelayer/rail0-sdk` | [commercelayer/rail0-ts](https://github.com/commercelayer/rail0-ts) |
+| Ruby SDK — `rail0-sdk` gem (`require "rail0"`) | `gem install rail0-sdk` | [commercelayer/rail0-ruby](https://github.com/commercelayer/rail0-ruby) |
+| Claude Agent Skill — `rail0-payments`, drives payments from an AI agent through the `rail0` CLI | `npx skills add commercelayer/rail0-skill` | [commercelayer/rail0-skill](https://github.com/commercelayer/rail0-skill) |
+
+Each repository's README is the reference for that client; this page documents the contract they all settle on.
 
 ## Supported chains
 
