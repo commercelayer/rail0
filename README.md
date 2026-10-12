@@ -517,6 +517,15 @@ The same applies to anything else that reads this view — the gateway lists its
 
 ## Development
 
+### Release branches
+
+Each contract release has a GitHub milestone and a branch of the same name
+(`v2.0.0`), cut from `main`. A change meant for that release opens its pull
+request **against the release branch** and carries the milestone; the branch
+merges into `main` once, with the version bump and the tag, and `main` is what
+is deployed. A pull request against `main` is for what ships independently of a
+contract version: docs, tooling, CI.
+
 The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted at `contracts/`.
 
 ### Prerequisites
