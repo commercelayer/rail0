@@ -132,9 +132,19 @@ contract RAIL0 {
         _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
 
         uint256 len = acceptedTokens.length;
+        // Same rule as the code check below, one level up: a deployment that accepts
+        // no token can never take a payment, and only the deploy script refused it.
+        if (len == 0) revert EmptyAllowlist();
         for (uint256 i = 0; i < len; ++i) {
             address t = acceptedTokens[i];
             if (t == address(0)) revert ZeroAddress();
+            // Fail at deploy, not at first payment: a typo'd or not-yet-deployed
+            // token address would otherwise produce a deployment whose every
+            // operation reverts (the compiler's extcodesize guard on the
+            // high-level token calls catches it, but only when a payment is
+            // attempted). Multi-chain deploys read addresses from per-chain
+            // config, exactly where a wrong-chain address slips in.
+            if (t.code.length == 0) revert TokenHasNoCode();
             if (_accepted[t]) revert DuplicateToken();
             _accepted[t] = true;
             _acceptedList.push(t);
@@ -285,6 +295,8 @@ contract RAIL0 {
     error NothingToRelease();
     error TokenNotAccepted();
     error DuplicateToken();
+    error TokenHasNoCode();
+    error EmptyAllowlist();
     error TransferFailed();
     error Reentrancy();
 
