@@ -578,6 +578,24 @@ the wallet had been used, not a guarantee the tooling provides, and one stray tr
 on a single chain moves the next deploy there. A shared address is **not** evidence of identical
 code — verify each deployment on its own, with the reads below.
 
+#### Development deployments: a dedicated deployer
+
+A deployment that only one environment uses — a **development** contract on Arc testnet, say,
+so local work stops landing on the contract staging indexes — must be made with a **dedicated
+development deployer**: a separate key, imported under its own name (`cast wallet import
+deployer-dev --interactive`) and funded on that chain only. **Never** use the main deployer
+(`0x134a…378d`) for it.
+
+The reason is the paragraph above. The main deployer's nonces are what put each release at one
+address on every chain; a development deploy from it on Arc is one more transaction there, which
+moves the next release on Arc to a different address from every other chain. A dedicated key
+keeps the main deployer's nonces aligned, and makes the development contract's address
+unambiguous: it can never collide with, or be mistaken for, a release address.
+
+The same script deploys it (`--account deployer-dev`), with the same allowlist and the same
+verification reads as any other deployment. Which environment uses which deployment is the
+gateway's concern (`environments:` on its `config/seeds.yml` contract rows), not the contract's.
+
 #### Verification
 
 The deployed bytecode is reproducible only from the exact build settings in
