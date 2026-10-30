@@ -44,7 +44,7 @@ exclude_lints = ["asm-keccak256", "block-timestamp"]
 # and Moderato appeared nowhere in the README. Every chain id below was checked against its endpoint's eth_chainId.
 [rpc_endpoints]
 arbitrum-sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
-arc-testnet      = "https://rpc.testnet.arc.network"
+arc-testnet      = "https://rpc.testnet.arc.io"
 base-sepolia     = "https://sepolia.base.org"
 celo-sepolia     = "https://forno.celo-sepolia.celo-testnet.org"
 optimism-sepolia = "https://sepolia.optimism.io"
@@ -57,7 +57,7 @@ polygon-amoy     = "https://polygon-amoy.drpc.org"
 # endpoint, the only entry here that needs a key.
 [etherscan]
 arbitrum-sepolia = { url = "https://arbitrum-sepolia.blockscout.com/api/", chain = 421614,   key = "" }
-arc-testnet      = { url = "https://testnet.arcscan.app/api/",             chain = 5042002,  key = "" }
+arc-testnet      = { url = "https://explorer.testnet.arc.io/api/",         chain = 5042002,  key = "" }
 base-sepolia     = { url = "https://base-sepolia.blockscout.com/api/",     chain = 84532,    key = "" }
 celo-sepolia     = { url = "https://celo-sepolia.blockscout.com/api/",     chain = 11142220, key = "" }
 optimism-sepolia = { url = "https://testnet-explorer.optimism.io/api/",    chain = 11155420, key = "" }
