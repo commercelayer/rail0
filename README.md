@@ -26,7 +26,7 @@ _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) trans
 - **One signature, no allowance.** Buyers sign an EIP-3009 `ReceiveWithAuthorization` off-chain; merchants submit and pay gas. No `approve`, no standing allowance for either party.
 - **Card-network primitives on-chain.** `authorize → capture → refund`, plus `charge`, `void`, `release`, and a signal-only `dispute`.
 - **Time-based recourse only.** `release` (after `authorizationExpiry`) and the merchant's discretionary `refund` are the only paths that return funds to the buyer; there is no arbitration layer.
-- **Portable.** Runs on any EVM that compiles Solidity 0.8.37 with EIP-3009-capable tokens.
+- **Portable.** Runs on any EVM that compiles Solidity 0.8.38 with EIP-3009-capable tokens.
 
 ## Clients
 
@@ -44,7 +44,7 @@ Each repository's README is the reference for that client; this page documents t
 
 _rail0_ has two hard requirements — any chain and token that meet them can run it:
 
-- **EVM-compatible.** Solidity 0.8.37 must compile and execute on the chain, targeting
+- **EVM-compatible.** Solidity 0.8.38 must compile and execute on the chain, targeting
   the **Cancun** fork — the contract uses `MCOPY` and, for its reentrancy lock, EIP-1153
   transient storage (`TLOAD`/`TSTORE`). Both are pinned in `foundry.toml`
   (`evm_version = "cancun"`), so a chain that predates Cancun is not a supported target.
@@ -590,7 +590,7 @@ The deployed bytecode is reproducible only from the exact build settings in
 
 | setting | value |
 | --- | --- |
-| `solc` | `0.8.37` (the **1.4.0** deployments: `0.8.31`) |
+| `solc` | `0.8.38` (the **1.4.0** deployments: `0.8.31`) |
 | `evm_version` | `cancun` |
 | `optimizer` / `optimizer_runs` | `true` / `10_000` |
 | `via_ir` | `true` |
@@ -598,7 +598,7 @@ The deployed bytecode is reproducible only from the exact build settings in
 `optimizer_runs` moved from `200` to `10_000` in 1.4.0, so a **1.3.x** deployment verifies at
 `200` and a **1.4.0** one at `10_000`. Likewise the compiler: the **1.4.0** deployments were built
 with `solc 0.8.31` and verify only with it (set `solc` and the pragmas back to `0.8.31`, or check
-out the `v1.4.0` tag); later releases use `0.8.37`. The same source at the wrong runs count compiles to
+out the `v1.4.0` tag); later releases use `0.8.38`. The same source at the wrong runs count compiles to
 different bytecode and the verifier rejects it with no hint as to why.
 
 ```sh
