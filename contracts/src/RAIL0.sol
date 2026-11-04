@@ -96,7 +96,7 @@ contract RAIL0 {
     /// working around an opaque asm block.
     ///
     /// `uint256` rather than `bool` on purpose — also measured. A `bool transient` costs
-    /// 140–557 gas MORE, since every read and write carries the bool's 0/1 normalisation.
+    /// 140–557 gas MORE, since every read and write carries the bool's 0/1 normalization.
     /// Nothing here needs the type to be a bool; 0 and 1 say the same thing for free.
     uint256 private transient _entered;
 
