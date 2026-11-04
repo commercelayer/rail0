@@ -30,12 +30,14 @@ _rail0_ is a peer-to-peer protocol: buyer (`payer`) and merchant (`payee`) trans
 
 ## Clients
 
-The contract needs nothing but a wallet and an RPC — the [Examples](#examples) below call it with `cast`. For an application, the official clients wrap the full lifecycle through the rail0 gateway: payment records and webhooks off-chain, the EIP-3009 and transaction signing locally, and one vocabulary everywhere — `authorize → capture`, `charge`, `void`, `release`, `refund`, `dispute`. Every client is generated from the same gateway API schema, so they carry the same types and the same error codes.
+The contract needs nothing but a wallet and an RPC — the [Examples](#examples) below call it with `cast`. For an application, the official clients wrap the full lifecycle through the rail0 gateway: payment records and webhooks off-chain, the EIP-3009 and transaction signing locally, and one vocabulary everywhere — `authorize → capture`, `charge`, `void`, `release`, `refund`, `dispute`. Every SDK is generated from the same gateway API schema, so they carry the same types and the same error codes; the CLI and the Agent Skill sit on top of the Go SDK.
 
 | Client | Install | Source |
 | --- | --- | --- |
 | TypeScript SDK — `@commercelayer/rail0-sdk` (Node and browser, no node builtins) | `npm install @commercelayer/rail0-sdk` | [commercelayer/rail0-ts](https://github.com/commercelayer/rail0-ts) |
+| Go SDK — `github.com/commercelayer/rail0-go` (Go ≥ 1.26) | `go get github.com/commercelayer/rail0-go` | [commercelayer/rail0-go](https://github.com/commercelayer/rail0-go) |
 | Ruby SDK — `rail0-sdk` gem (`require "rail0"`) | `gem install rail0-sdk` | [commercelayer/rail0-ruby](https://github.com/commercelayer/rail0-ruby) |
+| CLI — `rail0` (alias `r0`), a static binary built on the Go SDK | `curl -fsSL https://raw.githubusercontent.com/commercelayer/rail0-cli/main/install.sh \| sh` | [commercelayer/rail0-cli](https://github.com/commercelayer/rail0-cli) |
 | Claude Agent Skill — `rail0-payments`, drives payments from an AI agent through the `rail0` CLI | `npx skills add commercelayer/rail0-skill` | [commercelayer/rail0-skill](https://github.com/commercelayer/rail0-skill) |
 
 Each repository's README is the reference for that client; this page documents the contract they all settle on.
@@ -180,7 +182,7 @@ function void(bytes32 paymentId, Payment calldata p) external;
 
 Merchant cancels the authorization, returning all currently-escrowed funds to the buyer.
 
-Only `p.payee` may call, and only while the authorization is fully intact — **no amount has been captured yet** (`capturableAmount == p.amount`). There is no deadline within that constraint. The entire escrow is sent back to the buyer in a single `transfer` call, and `capturableAmount` is zeroed. Once any (even partial) capture has occurred, void reverts `AlreadyCaptured` — a partly-captured authorization can no longer be cancelled, and the buyer recovers the uncaptured remainder via `release` after `authorizationExpiry` instead. `void` reverts `NothingToVoid` when there is no escrow at all. Typical use: order rejected, fraud detected, or fulfillment canceled before any capture happened.
+Only `p.payee` may call, and only while the authorization is fully intact — **no amount has been captured yet** (`capturableAmount == p.amount`). There is no deadline within that constraint. The entire escrow is sent back to the buyer in a single `transfer` call, and `capturableAmount` is zeroed. Once any (even partial) capture has occurred, void reverts `AlreadyCaptured` — a partly-captured authorization can no longer be cancelled, and the buyer recovers the uncaptured remainder via `release` after `authorizationExpiry` instead. `void` reverts `NothingToVoid` when there is no escrow at all. Typical use: payment rejected, fraud detected, or fulfillment canceled before any capture happened.
 
 #### Release
 
@@ -348,7 +350,7 @@ event DisputeClosed    (bytes32 indexed paymentId, address indexed payer, addres
 - **Mempool front-running.** Every signature-funded operation uses `receiveWithAuthorization`, never `transferWithAuthorization`. The receive variant requires `msg.sender == to`, and every signature names _rail0_ as `to` — so a signature lifted from a pending transaction cannot be submitted straight to the token. With the transfer variant an attacker could do exactly that, landing the buyer's funds at the contract with no payment state and no payout path (see #35).
 - **Frozen-merchant escape hatch.** If the merchant is frozen by the token issuer (e.g. USDC blacklist) after authorization, `capture` reverts, but the buyer's escrow is not stuck: `void` (by the merchant, only while nothing has been captured) and `release` (after `authorizationExpiry`, by payer or payee) send funds directly to the buyer — `release` covers the partly-captured case where `void` is no longer available.
 - **Frozen-buyer escrow lock — accepted risk.** The mirror of the case above has **no** escape hatch. Every buyer-bound payout is a transfer to `payer` with no alternate recipient, so if the token issuer freezes the *buyer* after authorization, `void` and `release` both revert inside the transfer. While `authorizationExpiry` has not passed the funds can still move — `capture` settles to the (unfrozen) merchant — but once it passes, `capture` is closed too and the escrow has no on-chain path out at all. There is no admin, sweep or reassignment function by design, so this is permanent. The only mitigation is timing: capture within the authorization window. Pinned by `test_FrozenBuyer_EscrowIsStuckAfterExpiry`, so the behaviour cannot change silently.
-- **Partial-capture escrow freeze — accepted trade-off.** After _any_ partial capture the uncaptured remainder cannot be returned before `authorizationExpiry`, even when both parties want it returned. The three paths are each closed for their own reason: `void` requires the escrow fully intact (`AlreadyCaptured`), `release` requires expiry (`AuthorizationNotExpired`), and `refund` can only draw on the refundable bucket the capture created — never on the escrow. So a 100-unit authorization with 40 captured leaves the buyer's 60 held until the window ends, with no on-chain way to hand it back early. Note the lever this gives the merchant: capturing **one base unit** is enough to disable `void` and pin the escrow for the whole window, at the cost of settling that one unit. Accepted rather than fixed because the freeze is time-bound, not permanent — `release` opens at expiry and returns the remainder to the buyer, so no funds are lost, only immobilised — and because the alternatives (a partial `void`, or a consensual early-release path needing both signatures) each add a fund-moving entrypoint to a contract whose surface is deliberately small. The mitigation is choosing `authorizationExpiry` to match the fulfilment window rather than the maximum the protocol allows. Pinned by `test_PartialCapture_FreezesTheRemainderUntilExpiry`, which asserts both guards together and the exit at expiry, so the behaviour cannot change silently.
+- **Partial-capture escrow freeze — accepted trade-off.** After _any_ partial capture the uncaptured remainder cannot be returned before `authorizationExpiry`, even when both parties want it returned. The three paths are each closed for their own reason: `void` requires the escrow fully intact (`AlreadyCaptured`), `release` requires expiry (`AuthorizationNotExpired`), and `refund` can only draw on the refundable bucket the capture created — never on the escrow. So a 100-unit authorization with 40 captured leaves the buyer's 60 held until the window ends, with no on-chain way to hand it back early. Note the lever this gives the merchant: capturing **one base unit** is enough to disable `void` and pin the escrow for the whole window, at the cost of settling that one unit. Accepted rather than fixed because the freeze is time-bound, not permanent — `release` opens at expiry and returns the remainder to the buyer, so no funds are lost, only immobilized — and because the alternatives (a partial `void`, or a consensual early-release path needing both signatures) each add a fund-moving entrypoint to a contract whose surface is deliberately small. The mitigation is choosing `authorizationExpiry` to match the fulfilment window rather than the maximum the protocol allows. Pinned by `test_PartialCapture_FreezesTheRemainderUntilExpiry`, which asserts both guards together and the exit at expiry, so the behaviour cannot change silently.
 - **Merchant refund-window exposure.** `refundExpiry` has no upper bound and is the `validBefore` pinned into the merchant's refund signature — a signed-but-unsubmitted refund stays valid until that deadline. No standing allowance is held (refunds use a per-refund signature). Best practice is bounded refund windows aligned with consumer-protection requirements (typically 14–30 days), not far-future `refundExpiry`.
 - **Caller-supplied `paymentId`.** The contract enforces uniqueness (`PaymentAlreadyExists`) but does not generate IDs. Use a collision-resistant scheme (UUID, `keccak256(payer, payee, nonce)`, etc.).
 - **Disputes are signal, not arbitration.** The protocol has no arbitration layer: the only on-chain mechanisms that move funds back to the buyer are `release` (uncaptured escrow, after `authorizationExpiry`) and the merchant's discretionary `refund`. The `dispute` lifecycle adds a censorship-resistant record with **no fund effect**. Because a dispute carries no financial payoff, friendly-fraud abuse is structurally neutralized on-chain; detection and reaction belong off-chain.
@@ -385,7 +387,7 @@ export REFUND_EXPIRY=1738972800     # refund-by deadline (Unix seconds)
 # (payer, payee, token, amount, authorizationExpiry, refundExpiry)
 export PAYMENT="($PAYER,$PAYEE,$TOKEN,$AMOUNT,$AUTH_EXPIRY,$REFUND_EXPIRY)"
 export PAYMENT_TYPE='(address,address,address,uint120,uint48,uint48)'
-export PAYMENT_ID=$(cast keccak "order-12345")
+export PAYMENT_ID=$(cast keccak "payment-12345")
 ```
 
 ### Authorize (buyer signs EIP-3009, merchant submits)
@@ -530,11 +532,11 @@ The contract lives at `contracts/src/RAIL0.sol`. The Foundry workspace is rooted
 
 ### Prerequisites
 
-- [Foundry](https://book.getfoundry.sh/) (`forge`, `cast`, `anvil`)
+- [Foundry](https://book.getfoundry.sh/) (`forge`, `cast`, `anvil`) — CI pins the toolchain at `v1.7.1` (`.github/workflows/ci.yml`), since `forge fmt` / `forge lint` output moves between releases; use the same version locally.
 
 ### Cloning
 
-The repo uses `forge-std` as a git submodule — clone with `--recurse-submodules` (or run `git submodule update --init --recursive` after cloning).
+The repo uses `forge-std` as a git submodule (pinned to `v1.17.0` in `contracts/foundry.lock`) — clone with `--recurse-submodules` (or run `git submodule update --init --recursive` after cloning).
 
 ### Build & test
 
@@ -542,10 +544,10 @@ The repo uses `forge-std` as a git submodule — clone with `--recurse-submodule
 cd contracts
 forge build
 forge test
-forge fmt --check && forge lint   # also enforced by CI
+forge fmt --check && forge lint   # also enforced by CI (with forge build --sizes and forge test -vvv)
 ```
 
-The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, transfer-fails, a blacklisting (frozen-address) token, and a reentrant token, plus a mocked non-returning `transfer`, so no fork or RPC is needed.
+The test suite (`contracts/test/RAIL0.t.sol`) is self-contained — it includes mock ERC-20 implementations for the standard EIP-3009 case, a `transfer` that returns `false`, one that reverts, one with a short return value, a blacklisting (frozen-address) token, and a reentrant token, plus a mocked non-returning `transfer`, so no fork or RPC is needed.
 
 ### Deployment
 
@@ -561,7 +563,9 @@ forge script script/Deploy.s.sol \
   --broadcast
 ```
 
-See `contracts/.env.example` for the full set of environment variables.
+See `contracts/.env.example` for the full set of environment variables (`RPC`, `VERIFIER_URL`, `RAIL0_ACCEPTED_TOKENS`, and the optional `ETHERSCAN_API_KEY`). The script logs the address, `VERSION`, chain id, `DOMAIN_SEPARATOR` and the allowlist — the values a deployment record needs.
+
+`contracts/foundry.toml` names an RPC and a verifier for a **subset** of the live chains under `[rpc_endpoints]` / `[etherscan]` (`arbitrum-sepolia`, `arc-testnet`, `base-sepolia`, `celo-sepolia`, `optimism-sepolia`, `polygon-amoy`), so on those `--rpc-url <alias>` resolves by name and verification picks its endpoint up from `[etherscan]`; the Blockscout verifiers need no key, Polygon Amoy goes through Etherscan V2 and reads `ETHERSCAN_API_KEY`. Every other chain takes explicit `--rpc-url` / `--verifier-url` flags.
 
 The script uses plain `CREATE`, so the deployed address derives from `(deployer, nonce)` and not
 from the code. Two chains share an address only when the deployer's nonce happens to match on
@@ -624,7 +628,9 @@ forge verify-contract <address> src/RAIL0.sol:RAIL0 \
 
 ```
 contracts/
-├── foundry.toml
+├── foundry.toml                   # build settings, fmt/lint config, RPC + verifier aliases
+├── foundry.lock                   # forge-std pin (lib/forge-std is a submodule)
+├── .env.example                   # deploy-time environment variables
 ├── src/
 │   ├── RAIL0.sol                  # the protocol contract
 │   └── interfaces/
