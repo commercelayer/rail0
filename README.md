@@ -77,6 +77,7 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 
 | Chain       | Network  | Stablecoin(s) | Status            | HyperSync | Version | _rail0_ address |
 |-------------|----------|---------------|-------------------|-----------|---------|-----------------|
+| Arc         | Mainnet  | USDC, EURC    | **Live**          | yes       | 1.4.0   | [`0x13a4…Ba1F`](https://explorer.arc.io/address/0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F) |
 | Arbitrum    | Mainnet  | USDC          | Planned           | yes       | —       | — |
 | Avalanche   | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
 | Base        | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
@@ -90,6 +91,15 @@ Beyond those, _rail0_ is **best on stablecoin-native chains with sub-second fina
 | Unichain    | Mainnet  | USDC          | Planned           | yes       | —       | — |
 | World Chain | Mainnet  | USDC, EURC    | Planned           | yes       | —       | — |
 | Tempo       | —        | TIP-20        | Awaiting EIP-3009 | yes       | —       | — |
+
+**Arc mainnet (5042) is the first mainnet deployment**, and rail0's production chain:
+RAIL0 1.4.0 at `0x13a46eDDBE6105f5c055A2C8729b773C9C7BBa1F`, deployed 2026-11-05 in block
+29655929 (tx `0x9d948ab0…e93b493b4`). It accepts USDC (`0x3600…0000`, the ERC-20 interface of
+Arc's native gas coin) and EURC (`0xbEf5…21c1`). It was built from the `v1.4.0` tag with solc
+0.8.31, the same bytecode as the testnet 1.4.0 deployments (immutables aside), so it verifies
+with those settings. The address is the 1.3.0 one on the testnets because the deployer was at
+nonce 0 on this chain, as on Ethereum Sepolia: the address alone is no proof of the code, and
+`VERSION()` is.
 
 Tempo is the one entry whose status is not about scheduling: TIP-20 does not
 implement EIP-3009, so _rail0_ cannot run there at all until that changes.
